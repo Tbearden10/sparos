@@ -379,4 +379,275 @@ export default {
   }
 }
 
+Here’s the **complete and updated code** for the **Profile App**, **User Store**, **Activity Store**, **App State Store**, and **Theme Store**, ensuring that **user data** and **theme settings** persist in **local storage** using Zustand's `persist` middleware. This will allow the user and theme to remain stored even if the page is refreshed.
 
+---
+
+## **1. Profile App**
+
+The **Profile App** displays user details (username, platform, and emblem) and allows toggling the theme (light/dark mode).
+
+### **File:** `/apps/ProfileApp.js`
+```javascript
+import React from "react";
+import Draggable from "react-draggable"; // For drag-and-drop movement
+import { ResizableBox } from "react-resizable"; // For resizing the app window
+import "react-resizable/css/styles.css"; // Resizable styles
+import useUserStore from "../stores/useUserStore";
+import useThemeStore from "../stores/useThemeStore";
+
+function ProfileApp() {
+  const { user } = useUserStore(); // Access the user data
+  const { theme, toggleTheme } = useThemeStore(); // Access and toggle theme
+
+  if (!user) return null; // Do not render if no user data is present
+
+  return (
+    <Draggable grid={[20, 20]}>
+      <ResizableBox width={400} height={300} minConstraints={[300, 200]} maxConstraints={[800, 600]}>
+        <div className="app-window">
+          <h2>User Profile</h2>
+          <img src={user.emblem} alt="User Emblem" className="profile-emblem" />
+          <p><strong>Username:</strong> {user.username}</p>
+          <p><strong>Platform:</strong> {user.platform}</p>
+          <p><strong>Current Theme:</strong> {theme}</p>
+          <button onClick={toggleTheme}>Toggle Theme</button>
+        </div>
+      </ResizableBox>
+    </Draggable>
+  );
+}
+
+export default ProfileApp;
+```
+
+---
+
+### **Profile App Styles**
+- **File:** `/styles/ProfileApp.css`
+```css
+.app-window {
+  width: 400px;
+  height: 300px;
+  background-color: #161b22;
+  color: white;
+  padding: 20px;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  position: relative;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.5);
+}
+
+.profile-emblem {
+  width: 100px;
+  height: 100px;
+  border-radius: 50%;
+  margin-bottom: 10px;
+}
+
+button {
+  background: #58a6ff;
+  color: white;
+  border: none;
+  padding: 10px 20px;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+button:hover {
+  background: #1f6feb;
+}
+```
+
+---
+
+## **2. User Store**
+
+The **User Store** manages the user's data, fetches it from the API, and persists it in local storage using Zustand's `persist` middleware.
+
+### **File:** `/stores/useUserStore.js`
+```javascript
+import { create } from "zustand";
+import { persist } from "zustand/middleware";
+import { fetchUser } from "../utils/api"; // Assuming API helpers are in utils/api.js
+
+const useUserStore = create(
+  persist(
+    (set) => ({
+      user: null, // User data (e.g., username, platform, emblem)
+      isLoading: false, // Loading state for user data
+      error: null, // Error state for user fetching
+
+      // Fetch user data based on username
+      fetchUser: async (username, apiKey) => {
+        set({ isLoading: true, error: null });
+        try {
+          const user = await fetchUser(username, apiKey); // Fetch user from API
+          set({ user });
+        } catch (error) {
+          console.error("Error fetching user:", error.message);
+          set({ error: error.message });
+        } finally {
+          set({ isLoading: false });
+        }
+      },
+
+      // Clear user data (e.g., on logout)
+      resetUser: () => set({ user: null }),
+    }),
+    {
+      name: "user-store", // Key for local storage
+      partialize: (state) => ({ user: state.user }), // Only persist the user data
+    }
+  )
+);
+
+export default useUserStore;
+```
+
+---
+
+## **3. Activity Store**
+
+The **Activity Store** manages activity data (e.g., dungeons, activities grouped by dungeon) and does not require persistence since it is fetched dynamically.
+
+### **File:** `/stores/useActivityStore.js`
+```javascript
+import { create } from "zustand";
+import { fetchAllActivities } from "../utils/api"; // Assuming API helpers are in utils/api.js
+import { cleanActivity, groupActivitiesToDungeonArray } from "../utils/activityHelpers"; // Clean and group activities
+
+const useActivityStore = create((set) => ({
+  dungeons: [], // Grouped dungeon activities
+  isLoading: false, // Loading state for activity data
+  error: null, // Error state for activity fetching
+
+  // Fetch activities based on user ID
+  fetchActivities: async (userId, apiKey) => {
+    set({ isLoading: true, error: null });
+    try {
+      const rawActivities = await fetchAllActivities(userId, apiKey); // Fetch raw activities from API
+      const cleanedActivities = rawActivities.map(cleanActivity); // Clean the activities
+      const grouped = groupActivitiesToDungeonArray(cleanedActivities); // Group activities by dungeon
+      set({ dungeons: grouped });
+    } catch (error) {
+      console.error("Error fetching activities:", error.message);
+      set({ error: error.message });
+    } finally {
+      set({ isLoading: false });
+    }
+  },
+
+  // Clear all activity data (e.g., on user logout)
+  resetActivities: () => set({ dungeons: [] }),
+}));
+
+export default useActivityStore;
+```
+
+---
+
+## **4. App State Store**
+
+The **App State Store** manages the open/close states of apps, including positions and sizes for draggable and resizable windows.
+
+### **File:** `/stores/useAppStateStore.js`
+```javascript
+import { create } from "zustand";
+
+const useAppStateStore = create((set) => ({
+  apps: {
+    ProfileApp: { isOpen: false, isMinimized: false, position: { x: 100, y: 100 }, size: { width: 400, height: 300 } },
+  },
+
+  // Toggle app visibility
+  toggleApp: (appName) =>
+    set((state) => ({
+      apps: {
+        ...state.apps,
+        [appName]: { ...state.apps[appName], isOpen: !state.apps[appName].isOpen },
+      },
+    })),
+
+  // Reset all apps (e.g., on user logout)
+  resetAppState: () =>
+    set({
+      apps: {
+        ProfileApp: { isOpen: false, isMinimized: false, position: { x: 100, y: 100 }, size: { width: 400, height: 300 } },
+      },
+    }),
+}));
+
+export default useAppStateStore;
+```
+
+---
+
+## **5. Theme Store**
+
+The **Theme Store** handles the app's light/dark theme and persists it in local storage using Zustand's `persist` middleware.
+
+### **File:** `/stores/useThemeStore.js`
+```javascript
+import { create } from "zustand";
+import { persist } from "zustand/middleware";
+
+const useThemeStore = create(
+  persist(
+    (set) => ({
+      theme: "dark", // Default theme
+      toggleTheme: () =>
+        set((state) => ({
+          theme: state.theme === "dark" ? "light" : "dark", // Toggle between light and dark themes
+        })),
+    }),
+    {
+      name: "theme-store", // Key for local storage
+    }
+  )
+);
+
+export default useThemeStore;
+```
+
+---
+
+## **6. Integration in App Component**
+
+Here’s how all the stores and components integrate in the main `App.js`.
+
+### **File:** `/App.js`
+```javascript
+import React, { useState } from "react";
+import useUserStore from "./stores/useUserStore";
+import SearchBar from "./components/SearchBar";
+import Desktop from "./components/Desktop";
+
+function App({ apiKey }) {
+  const user = useUserStore((state) => state.user); // Get user data
+  const [isDataFetched, setIsDataFetched] = useState(false); // Track whether data is fetched
+
+  const handleSearchComplete = () => setIsDataFetched(true); // Callback when search completes
+
+  return isDataFetched && user ? (
+    <Desktop /> // Show desktop if user and data are available
+  ) : (
+    <SearchBar onSearchComplete={handleSearchComplete} apiKey={apiKey} /> // Show search bar otherwise
+  );
+}
+
+export default App;
+```
+
+---
+
+## **Summary**
+
+This setup includes:
+1. **Profile App:** Displays the user's profile and allows theme toggling.
+2. **User Store:** Manages and persists user data in local storage.
+3. **Activity Store:** Handles activity data dynamically without persistence.
+4. **App State Store:** Tracks the state of apps (open/close, position, size).
+5. **Theme Store:** Manages and persists the app's theme.
+
+Let me know if you need further clarifications or additional features!
