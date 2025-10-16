@@ -1,10 +1,16 @@
-# **Comprehensive Setup Guide (Cloudflare DB Edition, Modular Helpers, Full Clears Worker)**
+# **Comprehensive Setup Guide**
 
-This guide provides a full setup for your app, integrating Cloudflare KV for user activity summaries, modular helper functions for API calls, data cleaning, grouping, stat computation, and a backend worker for full clears (which both finds the fastest full clear and counts total full clears by checking every PGCR). All logic is separated for maintainability and clarity.
+This guide is split into two parts:
+
+1. **Part 1:** Full setup with everything except DB connection and full clears worker.
+2. **Part 2:** How to integrate Cloudflare KV DB and a full clears worker.
+3. **Setup Guides:** Instructions for installing and configuring React DnD, react-resizable, Zustand, and other core libraries.
 
 ---
 
-## **1. Folder/Project Structure**
+## **Part 1: Frontend + Core App Setup (No DB or Worker)**
+
+### **1. Folder/Project Structure**
 
 ```
 src/
@@ -26,23 +32,15 @@ src/
 │   ├── activityHelpers.js     # Data cleaning, grouping, stat helpers
 ├── styles/
 │   ├── global.css
-│   ├── Desktop.css
-│   ├── Taskbar.css
-│   ├── SearchBar.css
-│   ├── ProfileApp.css
-├── worker/
-│   ├── fullClearWorker.js     # Backend worker for full clears
-├── db/
-│   ├── cloudflareDb.js        # DB helper for KV read/write
 ├── App.js
 └── index.js
 ```
 
 ---
 
-## **2. Types**
+### **2. Types**
 - **File:** `/utils/types.js`
-```javascript name=src/utils/types.js
+```javascript
 /** @typedef {Object} Activity
  *  @property {string} dungeonId
  *  @property {string} dungeonName
@@ -56,19 +54,13 @@ src/
  *  @property {string} name
  *  @property {Activity[]} activities
  */
-
-/** @typedef {Object} UserSummary
- *  @property {string} membershipId
- *  @property {DungeonGroup[]} activities
- *  @property {Object} fullClears  // { [dungeonId]: { fastest: {...}, total: number } }
- */
 ```
 
 ---
 
-## **3. API Call Helpers**
+### **3. API Call Helpers**
 - **File:** `/utils/api.js`
-```javascript name=src/utils/api.js
+```javascript
 const API_BASE_URL = "https://www.bungie.net/Platform";
 
 /** Fetch user info by username */
@@ -101,26 +93,13 @@ export async function fetchAllActivities(userId, apiKey, maxPages = 20, pageSize
   }
   return allActivities;
 }
-
-/** Fetch PGCR for an activity instanceId */
-export async function fetchPgcr(instanceId, apiKey) {
-  const resp = await fetch(
-    `${API_BASE_URL}/Destiny2/Stats/PostGameCarnageReport/${instanceId}/`,
-    { headers: { "X-API-Key": apiKey } }
-  );
-  if (!resp.ok) return null;
-  return await resp.json();
-}
 ```
 
 ---
 
-## **4. Data Cleaning, Grouping, Stat Helpers**
+### **4. Data Cleaning, Grouping, Stat Helpers**
 - **File:** `/utils/activityHelpers.js`
-```javascript name=src/utils/activityHelpers.js
-import { DungeonGroup, Activity } from "./types";
-
-/** Cleans and normalizes an activity object from API */
+```javascript
 export function cleanActivity(activity) {
   return {
     dungeonId: activity.dungeonId || "unknown",
@@ -128,11 +107,9 @@ export function cleanActivity(activity) {
     instanceId: activity.instanceId,
     duration: activity.duration,
     values: activity.values || {}
-    // ...other fields if needed
   };
 }
 
-/** Groups activities into an array of dungeon objects */
 export function groupActivitiesToDungeonArray(activities) {
   const dungeonMap = {};
   activities.forEach(activity => {
@@ -150,7 +127,6 @@ export function groupActivitiesToDungeonArray(activities) {
   return Object.values(dungeonMap);
 }
 
-/** Aggregate stats for a dungeon group */
 export function getDungeonStats(dungeon) {
   return {
     totalClears: dungeon.activities.reduce((sum, act) => sum + (act.values?.clears || 0), 0),
@@ -163,9 +139,167 @@ export function getDungeonStats(dungeon) {
 
 ---
 
-## **5. Cloudflare DB Utility**
-- **File:** `/db/cloudflareDb.js`
-```javascript name=src/db/cloudflareDb.js
+### **5. Zustand Stores**
+#### **User Store**
+```javascript
+import { create } from "zustand";
+import { fetchUser } from "../utils/api";
+const useUserStore = create((set) => ({
+  user: null,
+  isLoading: false,
+  error: null,
+  fetchUser: async (username, apiKey) => {
+    set({ isLoading: true, error: null });
+    try {
+      const user = await fetchUser(username, apiKey);
+      set({ user });
+    } catch (error) {
+      set({ error: error.message });
+    } finally {
+      set({ isLoading: false });
+    }
+  },
+  resetUser: () => set({ user: null }),
+}));
+export default useUserStore;
+```
+
+#### **Activity Store**
+```javascript
+import { create } from "zustand";
+import { fetchAllActivities } from "../utils/api";
+import { cleanActivity, groupActivitiesToDungeonArray } from "../utils/activityHelpers";
+
+const useActivityStore = create((set) => ({
+  dungeons: [],
+  isLoading: false,
+  error: null,
+
+  fetchActivities: async (userId, apiKey) => {
+    set({ isLoading: true, error: null });
+    try {
+      const rawActivities = await fetchAllActivities(userId, apiKey);
+      const cleanedActivities = rawActivities.map(cleanActivity);
+      const grouped = groupActivitiesToDungeonArray(cleanedActivities);
+      set({ dungeons: grouped });
+    } catch (error) {
+      set({ error: error.message });
+    } finally {
+      set({ isLoading: false });
+    }
+  },
+
+  resetActivities: () => set({ dungeons: [] }),
+}));
+
+export default useActivityStore;
+```
+
+---
+
+### **6. Loading Utility**
+```javascript
+import useUserStore from "../stores/useUserStore";
+import useActivityStore from "../stores/useActivityStore";
+
+export default function useGlobalLoading() {
+  const userLoading = useUserStore((state) => state.isLoading);
+  const activityLoading = useActivityStore((state) => state.isLoading);
+  return userLoading || activityLoading;
+}
+```
+
+---
+
+### **7. Example Components**
+#### **SearchBar**
+```javascript
+import React, { useState } from "react";
+import useUserStore from "../stores/useUserStore";
+import useActivityStore from "../stores/useActivityStore";
+import useGlobalLoading from "../utils/useGlobalLoading";
+
+function SearchBar({ onSearchComplete, apiKey }) {
+  const [username, setUsername] = useState("");
+  const { fetchUser, resetUser } = useUserStore();
+  const { fetchActivities, resetActivities } = useActivityStore();
+  const isLoading = useGlobalLoading();
+
+  const handleSearch = async () => {
+    if (username.trim() === "") return;
+    resetUser();
+    resetActivities();
+    await fetchUser(username, apiKey);
+    const user = useUserStore.getState().user;
+    if (user && user.membershipId) {
+      await fetchActivities(user.membershipId, apiKey);
+      onSearchComplete();
+    }
+  };
+
+  return (
+    <div className="search-bar-container">
+      <input
+        type="text"
+        value={username}
+        onChange={(e) => setUsername(e.target.value)}
+        placeholder="Enter username..."
+        className="search-bar"
+        disabled={isLoading}
+      />
+      <button onClick={handleSearch} className="search-button" disabled={isLoading}>
+        {isLoading ? "Loading..." : "Search"}
+      </button>
+      {isLoading && <p className="loading-message">Fetching data, please wait...</p>}
+    </div>
+  );
+}
+
+export default SearchBar;
+```
+
+---
+
+### **8. App Component**
+```javascript
+import React, { useState } from "react";
+import useUserStore from "./stores/useUserStore";
+import SearchBar from "./components/SearchBar";
+import Desktop from "./components/Desktop";
+
+function App({ apiKey }) {
+  const user = useUserStore((state) => state.user);
+  const [isDataFetched, setIsDataFetched] = useState(false);
+  const handleSearchComplete = () => setIsDataFetched(true);
+  return isDataFetched && user
+    ? <Desktop />
+    : <SearchBar onSearchComplete={handleSearchComplete} apiKey={apiKey} />;
+}
+
+export default App;
+```
+
+---
+
+### **9. Global Styling**
+```css
+body {
+  margin: 0;
+  padding: 0;
+  font-family: Arial, sans-serif;
+  background-color: #0d1117;
+  color: white;
+}
+```
+
+---
+
+## **Part 2: Integrating Cloudflare KV DB and Full Clears Worker**
+
+### **1. Cloudflare KV Integration**
+
+#### **KV Helper**
+```javascript
 // For Cloudflare Worker (KV binding: env.USER_SUMMARIES)
 export async function getUserSummaryKV(env, membershipId) {
   const summaryStr = await env.USER_SUMMARIES.get(membershipId);
@@ -177,16 +311,22 @@ export async function setUserSummaryKV(env, membershipId, summary) {
 }
 ```
 
+#### **Program Flow**
+1. On user search, check KV for user summary.
+2. If found, pre-load desktop; fetch activities in background.
+3. If not found, fetch activities, process as usual, then kick off the full clears worker.
+4. After full clears worker finishes, save results to KV.
+
 ---
 
-## **6. Full Clear Worker (Backend Worker/Cloudflare Worker)**
-- **File:** `/worker/fullClearWorker.js`
-```javascript name=src/worker/fullClearWorker.js
+### **2. Full Clears Worker**
+
+```javascript
 import { fetchPgcr } from "../utils/api";
 
 /**
  * Computes fastest and total full clears for a dungeon.
- * @param {Array} activities - Array of { instanceId, duration, ... }
+ * @param {Array} activities - Array of { instanceId, duration }
  * @param {string} dungeonId
  * @param {string} apiKey
  * @returns { fastest: Activity, total: number }
@@ -219,128 +359,106 @@ function isFullClear(pgcr, dungeonId) {
 
 ---
 
-## **7. Store Example Using Helpers**
-- **File:** `/stores/useActivityStore.js`
-```javascript name=src/stores/useActivityStore.js
-import { create } from "zustand";
-import { fetchAllActivities } from "../utils/api";
-import { cleanActivity, groupActivitiesToDungeonArray } from "../utils/activityHelpers";
+### **3. Example Integration in SearchBar**
 
-const useActivityStore = create((set) => ({
-  dungeons: [],
-  isLoading: false,
-  error: null,
+```javascript
+import { getUserSummaryKV, setUserSummaryKV } from "../db/cloudflareDb";
+// ...other imports
 
-  fetchActivities: async (userId, apiKey) => {
-    set({ isLoading: true, error: null });
-    try {
-      const rawActivities = await fetchAllActivities(userId, apiKey);
-      const cleanedActivities = rawActivities.map(cleanActivity);
-      const grouped = groupActivitiesToDungeonArray(cleanedActivities);
-      set({ dungeons: grouped });
-    } catch (error) {
-      set({ error: error.message });
-    } finally {
-      set({ isLoading: false });
+async function handleSearch() {
+  // ...existing logic
+  if (user && user.membershipId) {
+    const summary = await getUserSummaryKV(env, user.membershipId);
+    if (summary) {
+      onSearchComplete();
+      fetchActivities(user.membershipId, apiKey);
+    } else {
+      await fetchActivities(user.membershipId, apiKey);
+      onSearchComplete();
+
+      // Kick off full clears worker (pseudo-code)
+      // for (const dungeon of useActivityStore.getState().dungeons) {
+      //   const result = await computeFullClears(dungeon.activities, dungeon.id, apiKey);
+      //   // Save result to KV
+      //   await setUserSummaryKV(env, user.membershipId, { ...existingSummary, fullClears: { [dungeon.id]: result } });
+      // }
     }
-  },
-
-  resetActivities: () => set({ dungeons: [] }),
-}));
-
-export default useActivityStore;
-```
-
----
-
-## **8. SearchBar Example Using Helpers**
-- **File:** `/components/SearchBar.js`
-```javascript name=src/components/SearchBar.js
-import React, { useState } from "react";
-import useUserStore from "../stores/useUserStore";
-import useActivityStore from "../stores/useActivityStore";
-import useGlobalLoading from "../utils/useGlobalLoading";
-import { fetchUser } from "../utils/api";
-import { getUserSummaryKV } from "../db/cloudflareDb";
-
-function SearchBar({ onSearchComplete, apiKey, env }) {
-  const [username, setUsername] = useState("");
-  const { resetUser } = useUserStore();
-  const { fetchActivities, resetActivities } = useActivityStore();
-  const isLoading = useGlobalLoading();
-
-  const handleSearch = async () => {
-    if (username.trim() === "") return;
-    resetUser();
-    resetActivities();
-    let user;
-    try {
-      user = await fetchUser(username, apiKey);
-    } catch (e) {
-      // handle fetch error
-      return;
-    }
-    if (user && user.membershipId) {
-      // Try to get summary from DB
-      const summary = await getUserSummaryKV(env, user.membershipId);
-      if (summary) {
-        onSearchComplete();
-        fetchActivities(user.membershipId, apiKey);
-      } else {
-        await fetchActivities(user.membershipId, apiKey);
-        onSearchComplete();
-        // Kick off full clear worker, update DB after
-      }
-    }
-  };
-
-  // ... UI code unchanged
-}
-
-export default SearchBar;
-```
-
----
-
-## **9. App Component Logic (Simplified)**
-- **File:** `/App.js`
-```javascript name=src/App.js
-import useUserStore from "./stores/useUserStore";
-import SearchBar from "./components/SearchBar";
-import Desktop from "./components/Desktop";
-import { getUserSummaryKV } from "./db/cloudflareDb";
-
-function App({ apiKey, env }) {
-  const user = useUserStore((state) => state.user);
-  const [isDataFetched, setIsDataFetched] = useState(false);
-
-  useEffect(() => {
-    async function checkDB() {
-      if (user && user.membershipId) {
-        const summary = await getUserSummaryKV(env, user.membershipId);
-        setIsDataFetched(!!summary);
-      }
-    }
-    checkDB();
-  }, [user]);
-
-  return isDataFetched && user
-    ? <Desktop />
-    : <SearchBar onSearchComplete={() => setIsDataFetched(true)} apiKey={apiKey} env={env} />;
+  }
 }
 ```
 
 ---
 
-## **10. Summary**
+### **4. Summary**
 
-- **API calls, data cleaning/grouping, and stat computation** are handled by dedicated helper modules.
-- **User summary stored in Cloudflare KV, read before activity fetching.**
-- **Full clear stats computed in backend worker and written to KV. Worker checks PGCR for every activity.**
-- **Both fastest full clear and total full clears are produced.**
-- **UI loads instantly if summary exists; otherwise, fetches activities and computes stats before render.**
-- **All logic is modular and easy to test or swap as needed.**
+- **KV is checked before activity fetch:** If summary exists, desktop loads instantly.
+- **Full clears worker checks every PGCR, returns both fastest and total full clears.**
+- **All helper logic and worker separated for maintainability.**
 
 ---
 
-Let me know if you need further helper functions, advanced schema for Cloudflare D1, or expanded worker/queue patterns!
+## **Setup Guides: Core Libraries**
+
+### **Zustand**
+```bash
+npm install zustand
+```
+- [Zustand Docs](https://docs.pmnd.rs/zustand/getting-started/introduction)
+- Usage: See store examples above.
+
+---
+
+### **react-dnd**
+```bash
+npm install react-dnd react-dnd-html5-backend
+```
+- [React DnD Docs](https://react-dnd.github.io/react-dnd/about)
+- Example usage:
+  ```javascript
+  import { DndProvider } from 'react-dnd';
+  import { HTML5Backend } from 'react-dnd-html5-backend';
+
+  function App() {
+    return (
+      <DndProvider backend={HTML5Backend}>
+        <YourComponent />
+      </DndProvider>
+    );
+  }
+  ```
+
+---
+
+### **react-resizable**
+```bash
+npm install react-resizable
+```
+- [react-resizable Docs](https://www.npmjs.com/package/react-resizable)
+- Example usage:
+  ```javascript
+  import { ResizableBox } from "react-resizable";
+
+  <ResizableBox width={200} height={200} minConstraints={[100, 100]} maxConstraints={[300, 300]}>
+    <div>Resizable Content</div>
+  </ResizableBox>
+  ```
+
+---
+
+### **react-draggable**
+```bash
+npm install react-draggable
+```
+- [react-draggable Docs](https://www.npmjs.com/package/react-draggable)
+- Example usage:
+  ```javascript
+  import Draggable from "react-draggable";
+
+  <Draggable>
+    <div>Drag me!</div>
+  </Draggable>
+  ```
+
+---
+
+*Let me know if you need setup guides for other libraries!*
