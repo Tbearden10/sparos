@@ -1,7 +1,6 @@
-# **Comprehensive Setup Guide (Cloudflare DB Edition, Modular Helpers)**
+# **Comprehensive Setup Guide (Cloudflare DB Edition, Modular Helpers, Full Clears Worker)**
 
-This guide provides a full setup for your app with Cloudflare DB integration for user activity summaries, **modular helper functions for API calls, cleaning, grouping, and stat computation**, and separation of concerns across your codebase.  
-**UPDATED:** All API and data helpers are separated for clarity—making maintenance and testing easier.
+This guide provides a full setup for your app, integrating Cloudflare KV for user activity summaries, modular helper functions for API calls, data cleaning, grouping, stat computation, and a backend worker for full clears (which both finds the fastest full clear and counts total full clears by checking every PGCR). All logic is separated for maintainability and clarity.
 
 ---
 
@@ -32,9 +31,9 @@ src/
 │   ├── SearchBar.css
 │   ├── ProfileApp.css
 ├── worker/
-│   ├── fullClearWorker.js
+│   ├── fullClearWorker.js     # Backend worker for full clears
 ├── db/
-│   ├── cloudflareDb.js        # DB utility to read/write user summary
+│   ├── cloudflareDb.js        # DB helper for KV read/write
 ├── App.js
 └── index.js
 ```
@@ -47,10 +46,8 @@ src/
 /** @typedef {Object} Activity
  *  @property {string} dungeonId
  *  @property {string} dungeonName
- *  @property {string} [id]
- *  @property {string} [date]
- *  @property {number} [kills]
- *  @property {number} [score]
+ *  @property {string} instanceId
+ *  @property {number} duration
  *  @property {Object} [values]
  */
 
@@ -63,6 +60,7 @@ src/
 /** @typedef {Object} UserSummary
  *  @property {string} membershipId
  *  @property {DungeonGroup[]} activities
+ *  @property {Object} fullClears  // { [dungeonId]: { fastest: {...}, total: number } }
  */
 ```
 
@@ -103,6 +101,16 @@ export async function fetchAllActivities(userId, apiKey, maxPages = 20, pageSize
   }
   return allActivities;
 }
+
+/** Fetch PGCR for an activity instanceId */
+export async function fetchPgcr(instanceId, apiKey) {
+  const resp = await fetch(
+    `${API_BASE_URL}/Destiny2/Stats/PostGameCarnageReport/${instanceId}/`,
+    { headers: { "X-API-Key": apiKey } }
+  );
+  if (!resp.ok) return null;
+  return await resp.json();
+}
 ```
 
 ---
@@ -117,7 +125,10 @@ export function cleanActivity(activity) {
   return {
     dungeonId: activity.dungeonId || "unknown",
     dungeonName: activity.dungeonName || "Unknown Dungeon",
-    ...activity
+    instanceId: activity.instanceId,
+    duration: activity.duration,
+    values: activity.values || {}
+    // ...other fields if needed
   };
 }
 
@@ -171,49 +182,38 @@ export async function setUserSummaryKV(env, membershipId, summary) {
 ## **6. Full Clear Worker (Backend Worker/Cloudflare Worker)**
 - **File:** `/worker/fullClearWorker.js`
 ```javascript name=src/worker/fullClearWorker.js
+import { fetchPgcr } from "../utils/api";
+
 /**
- * Example: Cloudflare Worker for Fastest Full Clear Stat
- * This worker receives a job payload with dungeon activities,
- * checks PGCRs, and returns the fastest full clear result.
+ * Computes fastest and total full clears for a dungeon.
+ * @param {Array} activities - Array of { instanceId, duration, ... }
+ * @param {string} dungeonId
+ * @param {string} apiKey
+ * @returns { fastest: Activity, total: number }
  */
-export default {
-  async fetch(request, env) {
-    const { membershipId, dungeonId, activityIds } = await request.json();
-    let fastestClear = null;
+export async function computeFullClears(activities, dungeonId, apiKey) {
+  // Sort by duration ascending for fastest first
+  const sorted = activities.slice().sort((a, b) => a.duration - b.duration);
 
-    for (const activityId of activityIds) {
-      // Fetch PGCR from Bungie API
-      const pgcrResp = await fetch(
-        `https://www.bungie.net/Platform/Destiny2/Stats/PostGameCarnageReport/${activityId}/`,
-        { headers: { "X-API-Key": env.BUNGIE_API_KEY } }
-      );
-      if (!pgcrResp.ok) continue;
-      const pgcr = await pgcrResp.json();
+  let fastestFullClear = null;
+  let totalFullClears = 0;
 
-      // Check if PGCR represents a full clear (implement your own logic)
-      if (isFullClear(pgcr, dungeonId)) {
-        const clearTime = getClearTime(pgcr);
-        if (!fastestClear || clearTime < fastestClear.clearTime) {
-          fastestClear = { activityId, clearTime, pgcr };
-        }
+  for (const activity of sorted) {
+    const pgcr = await fetchPgcr(activity.instanceId, apiKey);
+    if (pgcr && isFullClear(pgcr, dungeonId)) {
+      totalFullClears++;
+      if (!fastestFullClear) {
+        fastestFullClear = activity;
       }
     }
-
-    // Save result to KV using DB helper
-    await env.USER_SUMMARIES.put(membershipId, JSON.stringify({ dungeonId, fastestClear }));
-    return new Response(JSON.stringify({ dungeonId, membershipId, fastestClear }), {
-      headers: { "Content-Type": "application/json" }
-    });
   }
+  return { fastest: fastestFullClear, total: totalFullClears };
 }
 
+/** Implement logic to determine if PGCR is a full clear for this dungeon */
 function isFullClear(pgcr, dungeonId) {
-  // Implement logic for determining full clear
-  return true;
-}
-
-function getClearTime(pgcr) {
-  return pgcr.Response.activityDetails.clearTimeSeconds || 0;
+  // Custom logic per dungeon, e.g., all phases/bosses complete, etc.
+  return true; // Stub: replace with actual check
 }
 ```
 
@@ -302,11 +302,42 @@ export default SearchBar;
 
 ---
 
-## **9. Summary**
+## **9. App Component Logic (Simplified)**
+- **File:** `/App.js`
+```javascript name=src/App.js
+import useUserStore from "./stores/useUserStore";
+import SearchBar from "./components/SearchBar";
+import Desktop from "./components/Desktop";
+import { getUserSummaryKV } from "./db/cloudflareDb";
+
+function App({ apiKey, env }) {
+  const user = useUserStore((state) => state.user);
+  const [isDataFetched, setIsDataFetched] = useState(false);
+
+  useEffect(() => {
+    async function checkDB() {
+      if (user && user.membershipId) {
+        const summary = await getUserSummaryKV(env, user.membershipId);
+        setIsDataFetched(!!summary);
+      }
+    }
+    checkDB();
+  }, [user]);
+
+  return isDataFetched && user
+    ? <Desktop />
+    : <SearchBar onSearchComplete={() => setIsDataFetched(true)} apiKey={apiKey} env={env} />;
+}
+```
+
+---
+
+## **10. Summary**
 
 - **API calls, data cleaning/grouping, and stat computation** are handled by dedicated helper modules.
 - **User summary stored in Cloudflare KV, read before activity fetching.**
-- **Full clear stats computed in backend worker and written to KV.**
+- **Full clear stats computed in backend worker and written to KV. Worker checks PGCR for every activity.**
+- **Both fastest full clear and total full clears are produced.**
 - **UI loads instantly if summary exists; otherwise, fetches activities and computes stats before render.**
 - **All logic is modular and easy to test or swap as needed.**
 
