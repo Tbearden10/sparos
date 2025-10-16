@@ -1,6 +1,6 @@
-# **Comprehensive Setup Guide (Cloudflare DB Edition, Modular Helpers, Full Clears Worker)**
+# **Comprehensive Setup Guide (Local Storage, Modular Helpers, Full Clears Worker, No DB Yet)**
 
-This guide provides a full setup for your app, integrating Cloudflare KV for user activity summaries, modular helper functions for API calls, data cleaning, grouping, stat computation, and a backend worker for full clears (which both finds the fastest full clear and counts total full clears by checking every PGCR). All logic is separated for maintainability and clarity.
+This guide provides a full setup for your app, using local storage for user and theme data, modular helper functions for API calls, data cleaning, grouping, stat computation, and a backend worker for full clears computation (which finds the fastest full clear and counts total full clears by checking every PGCR). **All database code is replaced with placeholders and not included.**
 
 ---
 
@@ -32,8 +32,6 @@ src/
 │   ├── ProfileApp.css
 ├── worker/
 │   ├── fullClearWorker.js     # Backend worker for full clears
-├── db/
-│   ├── cloudflareDb.js        # DB helper for KV read/write
 ├── App.js
 └── index.js
 ```
@@ -55,12 +53,6 @@ src/
  *  @property {string} id
  *  @property {string} name
  *  @property {Activity[]} activities
- */
-
-/** @typedef {Object} UserSummary
- *  @property {string} membershipId
- *  @property {DungeonGroup[]} activities
- *  @property {Object} fullClears  // { [dungeonId]: { fastest: {...}, total: number } }
  */
 ```
 
@@ -118,8 +110,6 @@ export async function fetchPgcr(instanceId, apiKey) {
 ## **4. Data Cleaning, Grouping, Stat Helpers**
 - **File:** `/utils/activityHelpers.js`
 ```javascript name=src/utils/activityHelpers.js
-import { DungeonGroup, Activity } from "./types";
-
 /** Cleans and normalizes an activity object from API */
 export function cleanActivity(activity) {
   return {
@@ -128,7 +118,6 @@ export function cleanActivity(activity) {
     instanceId: activity.instanceId,
     duration: activity.duration,
     values: activity.values || {}
-    // ...other fields if needed
   };
 }
 
@@ -163,23 +152,7 @@ export function getDungeonStats(dungeon) {
 
 ---
 
-## **5. Cloudflare DB Utility**
-- **File:** `/db/cloudflareDb.js`
-```javascript name=src/db/cloudflareDb.js
-// For Cloudflare Worker (KV binding: env.USER_SUMMARIES)
-export async function getUserSummaryKV(env, membershipId) {
-  const summaryStr = await env.USER_SUMMARIES.get(membershipId);
-  return summaryStr ? JSON.parse(summaryStr) : null;
-}
-
-export async function setUserSummaryKV(env, membershipId, summary) {
-  await env.USER_SUMMARIES.put(membershipId, JSON.stringify(summary));
-}
-```
-
----
-
-## **6. Full Clear Worker (Backend Worker/Cloudflare Worker)**
+## **5. Full Clear Worker (Backend Worker/Cloudflare Worker)**
 - **File:** `/worker/fullClearWorker.js`
 ```javascript name=src/worker/fullClearWorker.js
 import { fetchPgcr } from "../utils/api";
@@ -219,7 +192,45 @@ function isFullClear(pgcr, dungeonId) {
 
 ---
 
-## **7. Store Example Using Helpers**
+## **6. Zustand Stores**
+
+### **User Store**
+- **File:** `/stores/useUserStore.js`
+```javascript name=src/stores/useUserStore.js
+import { create } from "zustand";
+import { persist } from "zustand/middleware";
+import { fetchUser } from "../utils/api";
+
+const useUserStore = create(
+  persist(
+    (set) => ({
+      user: null,
+      isLoading: false,
+      error: null,
+      fetchUser: async (username, apiKey) => {
+        set({ isLoading: true, error: null });
+        try {
+          const user = await fetchUser(username, apiKey);
+          set({ user });
+        } catch (error) {
+          set({ error: error.message });
+        } finally {
+          set({ isLoading: false });
+        }
+      },
+      resetUser: () => set({ user: null }),
+    }),
+    {
+      name: "user-store",
+      partialize: (state) => ({ user: state.user }),
+    }
+  )
+);
+
+export default useUserStore;
+```
+
+### **Activity Store**
 - **File:** `/stores/useActivityStore.js`
 ```javascript name=src/stores/useActivityStore.js
 import { create } from "zustand";
@@ -251,21 +262,98 @@ const useActivityStore = create((set) => ({
 export default useActivityStore;
 ```
 
+### **App State Store**
+- **File:** `/stores/useAppStateStore.js`
+```javascript name=src/stores/useAppStateStore.js
+import { create } from "zustand";
+
+const useAppStateStore = create((set) => ({
+  apps: {
+    ProfileApp: { isOpen: false, isMinimized: false, position: { x: 100, y: 100 }, size: { width: 400, height: 300 } },
+  },
+  toggleApp: (appName) =>
+    set((state) => ({
+      apps: {
+        ...state.apps,
+        [appName]: { ...state.apps[appName], isOpen: !state.apps[appName].isOpen },
+      },
+    })),
+  resetAppState: () =>
+    set({
+      apps: {
+        ProfileApp: { isOpen: false, isMinimized: false, position: { x: 100, y: 100 }, size: { width: 400, height: 300 } },
+      },
+    }),
+}));
+
+export default useAppStateStore;
+```
+
+### **Theme Store**
+- **File:** `/stores/useThemeStore.js`
+```javascript name=src/stores/useThemeStore.js
+import { create } from "zustand";
+import { persist } from "zustand/middleware";
+
+const useThemeStore = create(
+  persist(
+    (set) => ({
+      theme: "dark",
+      toggleTheme: () =>
+        set((state) => ({
+          theme: state.theme === "dark" ? "light" : "dark",
+        })),
+    }),
+    {
+      name: "theme-store",
+    }
+  )
+);
+
+export default useThemeStore;
+```
+
+---
+
+## **7. Integration in App Component**
+
+- **File:** `/App.js`
+```javascript name=src/App.js
+import React, { useState } from "react";
+import useUserStore from "./stores/useUserStore";
+import SearchBar from "./components/SearchBar";
+import Desktop from "./components/Desktop";
+
+function App({ apiKey }) {
+  const user = useUserStore((state) => state.user);
+  const [isDataFetched, setIsDataFetched] = useState(false);
+
+  const handleSearchComplete = () => setIsDataFetched(true);
+
+  return isDataFetched && user ? (
+    <Desktop />
+  ) : (
+    <SearchBar onSearchComplete={handleSearchComplete} apiKey={apiKey} />
+  );
+}
+
+export default App;
+```
+
 ---
 
 ## **8. SearchBar Example Using Helpers**
+
 - **File:** `/components/SearchBar.js`
 ```javascript name=src/components/SearchBar.js
 import React, { useState } from "react";
 import useUserStore from "../stores/useUserStore";
 import useActivityStore from "../stores/useActivityStore";
 import useGlobalLoading from "../utils/useGlobalLoading";
-import { fetchUser } from "../utils/api";
-import { getUserSummaryKV } from "../db/cloudflareDb";
 
-function SearchBar({ onSearchComplete, apiKey, env }) {
+function SearchBar({ onSearchComplete, apiKey }) {
   const [username, setUsername] = useState("");
-  const { resetUser } = useUserStore();
+  const { fetchUser, resetUser } = useUserStore();
   const { fetchActivities, resetActivities } = useActivityStore();
   const isLoading = useGlobalLoading();
 
@@ -273,28 +361,31 @@ function SearchBar({ onSearchComplete, apiKey, env }) {
     if (username.trim() === "") return;
     resetUser();
     resetActivities();
-    let user;
-    try {
-      user = await fetchUser(username, apiKey);
-    } catch (e) {
-      // handle fetch error
-      return;
-    }
+    await fetchUser(username, apiKey);
+    const user = useUserStore.getState().user;
     if (user && user.membershipId) {
-      // Try to get summary from DB
-      const summary = await getUserSummaryKV(env, user.membershipId);
-      if (summary) {
-        onSearchComplete();
-        fetchActivities(user.membershipId, apiKey);
-      } else {
-        await fetchActivities(user.membershipId, apiKey);
-        onSearchComplete();
-        // Kick off full clear worker, update DB after
-      }
+      await fetchActivities(user.membershipId, apiKey);
+      onSearchComplete();
+      // Placeholder: Kick off full clear worker logic here if needed
     }
   };
 
-  // ... UI code unchanged
+  return (
+    <div className="search-bar-container">
+      <input
+        type="text"
+        value={username}
+        onChange={(e) => setUsername(e.target.value)}
+        placeholder="Enter username..."
+        className="search-bar"
+        disabled={isLoading}
+      />
+      <button onClick={handleSearch} className="search-button" disabled={isLoading}>
+        {isLoading ? "Loading..." : "Search"}
+      </button>
+      {isLoading && <p className="loading-message">Fetching data, please wait...</p>}
+    </div>
+  );
 }
 
 export default SearchBar;
@@ -302,105 +393,22 @@ export default SearchBar;
 
 ---
 
-## **9. App Component Logic (Simplified)**
-- **File:** `/App.js`
-```javascript name=src/App.js
-import useUserStore from "./stores/useUserStore";
-import SearchBar from "./components/SearchBar";
-import Desktop from "./components/Desktop";
-import { getUserSummaryKV } from "./db/cloudflareDb";
+## **9. Profile App**
 
-function App({ apiKey, env }) {
-  const user = useUserStore((state) => state.user);
-  const [isDataFetched, setIsDataFetched] = useState(false);
-
-  useEffect(() => {
-    async function checkDB() {
-      if (user && user.membershipId) {
-        const summary = await getUserSummaryKV(env, user.membershipId);
-        setIsDataFetched(!!summary);
-      }
-    }
-    checkDB();
-  }, [user]);
-
-  return isDataFetched && user
-    ? <Desktop />
-    : <SearchBar onSearchComplete={() => setIsDataFetched(true)} apiKey={apiKey} env={env} />;
-}
-```
-
----
-
-## **10. Summary**
-
-- **API calls, data cleaning/grouping, and stat computation** are handled by dedicated helper modules.
-- **User summary stored in Cloudflare KV, read before activity fetching.**
-- **Full clear stats computed in backend worker and written to KV. Worker checks PGCR for every activity.**
-- **Both fastest full clear and total full clears are produced.**
-- **UI loads instantly if summary exists; otherwise, fetches activities and computes stats before render.**
-- **All logic is modular and easy to test or swap as needed.**
-
----
-
-Let me know if you need further helper functions, advanced schema for Cloudflare D1, or expanded worker/queue patterns!
-
-
-// Assume KV binding: env.USER_SUMMARIES
-
-const RATE_LIMIT_MINUTES = 30;
-
-export default {
-  async fetch(request, env) {
-    const { membershipId, dungeonId, activities } = await request.json();
-    const summaryKey = `fullClear:${membershipId}:${dungeonId}`;
-
-    // Get last run info from KV
-    const summaryStr = await env.USER_SUMMARIES.get(summaryKey);
-    let summary = summaryStr ? JSON.parse(summaryStr) : null;
-
-    const now = Date.now();
-    const lastRun = summary?.lastRun || 0;
-    const minutesSinceLastRun = (now - lastRun) / 1000 / 60;
-
-    if (summary && minutesSinceLastRun < RATE_LIMIT_MINUTES) {
-      // Return cached result if rate limit not exceeded
-      return new Response(JSON.stringify(summary), { headers: { "Content-Type": "application/json" } });
-    }
-
-    // Run full clear computation (your existing logic)
-    const result = await computeFullClears(activities, dungeonId, env.BUNGIE_API_KEY);
-
-    // Save result + time in KV
-    summary = { ...result, lastRun: now };
-    await env.USER_SUMMARIES.put(summaryKey, JSON.stringify(summary));
-
-    return new Response(JSON.stringify(summary), { headers: { "Content-Type": "application/json" } });
-  }
-}
-
-Here’s the **complete and updated code** for the **Profile App**, **User Store**, **Activity Store**, **App State Store**, and **Theme Store**, ensuring that **user data** and **theme settings** persist in **local storage** using Zustand's `persist` middleware. This will allow the user and theme to remain stored even if the page is refreshed.
-
----
-
-## **1. Profile App**
-
-The **Profile App** displays user details (username, platform, and emblem) and allows toggling the theme (light/dark mode).
-
-### **File:** `/apps/ProfileApp.js`
-```javascript
+- **File:** `/apps/ProfileApp.js`
+```javascript name=src/apps/ProfileApp.js
 import React from "react";
-import Draggable from "react-draggable"; // For drag-and-drop movement
-import { ResizableBox } from "react-resizable"; // For resizing the app window
-import "react-resizable/css/styles.css"; // Resizable styles
+import Draggable from "react-draggable";
+import { ResizableBox } from "react-resizable";
+import "react-resizable/css/styles.css";
 import useUserStore from "../stores/useUserStore";
 import useThemeStore from "../stores/useThemeStore";
 
 function ProfileApp() {
-  const { user } = useUserStore(); // Access the user data
-  const { theme, toggleTheme } = useThemeStore(); // Access and toggle theme
+  const { user } = useUserStore();
+  const { theme, toggleTheme } = useThemeStore();
 
-  if (!user) return null; // Do not render if no user data is present
+  if (!user) return null;
 
   return (
     <Draggable grid={[20, 20]}>
@@ -423,231 +431,81 @@ export default ProfileApp;
 
 ---
 
-### **Profile App Styles**
-- **File:** `/styles/ProfileApp.css`
-```css
-.app-window {
-  width: 400px;
-  height: 300px;
-  background-color: #161b22;
+## **10. Setup Guides: Core Libraries**
+
+### **Zustand**
+```bash
+npm install zustand
+```
+- [Zustand Docs](https://docs.pmnd.rs/zustand/getting-started/introduction)
+
+---
+
+### **react-dnd**
+```bash
+npm install react-dnd react-dnd-html5-backend
+```
+- [React DnD Docs](https://react-dnd.github.io/react-dnd/about)
+- Example usage:
+  ```javascript
+  import { DndProvider } from 'react-dnd';
+  import { HTML5Backend } from 'react-dnd-html5-backend';
+
+  function App() {
+    return (
+      <DndProvider backend={HTML5Backend}>
+        <YourComponent />
+      </DndProvider>
+    );
+  }
+  ```
+
+---
+
+### **react-resizable**
+```bash
+npm install react-resizable
+```
+- [react-resizable Docs](https://www.npmjs.com/package/react-resizable)
+- Example usage:
+  ```javascript
+  import { ResizableBox } from "react-resizable";
+
+  <ResizableBox width={200} height={200} minConstraints={[100, 100]} maxConstraints={[300, 300]}>
+    <div>Resizable Content</div>
+  </ResizableBox>
+  ```
+
+---
+
+### **react-draggable**
+```bash
+npm install react-draggable
+```
+- [react-draggable Docs](https://www.npmjs.com/package/react-draggable)
+- Example usage:
+  ```javascript
+  import Draggable from "react-draggable";
+
+  <Draggable>
+    <div>Drag me!</div>
+  </Draggable>
+  ```
+
+---
+
+## **11. Global Styling**
+- **File:** `/styles/global.css`
+```css name=src/styles/global.css
+body {
+  margin: 0;
+  padding: 0;
+  font-family: Arial, sans-serif;
+  background-color: #0d1117;
   color: white;
-  padding: 20px;
-  border: 1px solid #30363d;
-  border-radius: 8px;
-  position: relative;
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.5);
-}
-
-.profile-emblem {
-  width: 100px;
-  height: 100px;
-  border-radius: 50%;
-  margin-bottom: 10px;
-}
-
-button {
-  background: #58a6ff;
-  color: white;
-  border: none;
-  padding: 10px 20px;
-  cursor: pointer;
-  border-radius: 4px;
-}
-
-button:hover {
-  background: #1f6feb;
 }
 ```
 
 ---
 
-## **2. User Store**
-
-The **User Store** manages the user's data, fetches it from the API, and persists it in local storage using Zustand's `persist` middleware.
-
-### **File:** `/stores/useUserStore.js`
-```javascript
-import { create } from "zustand";
-import { persist } from "zustand/middleware";
-import { fetchUser } from "../utils/api"; // Assuming API helpers are in utils/api.js
-
-const useUserStore = create(
-  persist(
-    (set) => ({
-      user: null, // User data (e.g., username, platform, emblem)
-      isLoading: false, // Loading state for user data
-      error: null, // Error state for user fetching
-
-      // Fetch user data based on username
-      fetchUser: async (username, apiKey) => {
-        set({ isLoading: true, error: null });
-        try {
-          const user = await fetchUser(username, apiKey); // Fetch user from API
-          set({ user });
-        } catch (error) {
-          console.error("Error fetching user:", error.message);
-          set({ error: error.message });
-        } finally {
-          set({ isLoading: false });
-        }
-      },
-
-      // Clear user data (e.g., on logout)
-      resetUser: () => set({ user: null }),
-    }),
-    {
-      name: "user-store", // Key for local storage
-      partialize: (state) => ({ user: state.user }), // Only persist the user data
-    }
-  )
-);
-
-export default useUserStore;
-```
-
----
-
-## **3. Activity Store**
-
-The **Activity Store** manages activity data (e.g., dungeons, activities grouped by dungeon) and does not require persistence since it is fetched dynamically.
-
-### **File:** `/stores/useActivityStore.js`
-```javascript
-import { create } from "zustand";
-import { fetchAllActivities } from "../utils/api"; // Assuming API helpers are in utils/api.js
-import { cleanActivity, groupActivitiesToDungeonArray } from "../utils/activityHelpers"; // Clean and group activities
-
-const useActivityStore = create((set) => ({
-  dungeons: [], // Grouped dungeon activities
-  isLoading: false, // Loading state for activity data
-  error: null, // Error state for activity fetching
-
-  // Fetch activities based on user ID
-  fetchActivities: async (userId, apiKey) => {
-    set({ isLoading: true, error: null });
-    try {
-      const rawActivities = await fetchAllActivities(userId, apiKey); // Fetch raw activities from API
-      const cleanedActivities = rawActivities.map(cleanActivity); // Clean the activities
-      const grouped = groupActivitiesToDungeonArray(cleanedActivities); // Group activities by dungeon
-      set({ dungeons: grouped });
-    } catch (error) {
-      console.error("Error fetching activities:", error.message);
-      set({ error: error.message });
-    } finally {
-      set({ isLoading: false });
-    }
-  },
-
-  // Clear all activity data (e.g., on user logout)
-  resetActivities: () => set({ dungeons: [] }),
-}));
-
-export default useActivityStore;
-```
-
----
-
-## **4. App State Store**
-
-The **App State Store** manages the open/close states of apps, including positions and sizes for draggable and resizable windows.
-
-### **File:** `/stores/useAppStateStore.js`
-```javascript
-import { create } from "zustand";
-
-const useAppStateStore = create((set) => ({
-  apps: {
-    ProfileApp: { isOpen: false, isMinimized: false, position: { x: 100, y: 100 }, size: { width: 400, height: 300 } },
-  },
-
-  // Toggle app visibility
-  toggleApp: (appName) =>
-    set((state) => ({
-      apps: {
-        ...state.apps,
-        [appName]: { ...state.apps[appName], isOpen: !state.apps[appName].isOpen },
-      },
-    })),
-
-  // Reset all apps (e.g., on user logout)
-  resetAppState: () =>
-    set({
-      apps: {
-        ProfileApp: { isOpen: false, isMinimized: false, position: { x: 100, y: 100 }, size: { width: 400, height: 300 } },
-      },
-    }),
-}));
-
-export default useAppStateStore;
-```
-
----
-
-## **5. Theme Store**
-
-The **Theme Store** handles the app's light/dark theme and persists it in local storage using Zustand's `persist` middleware.
-
-### **File:** `/stores/useThemeStore.js`
-```javascript
-import { create } from "zustand";
-import { persist } from "zustand/middleware";
-
-const useThemeStore = create(
-  persist(
-    (set) => ({
-      theme: "dark", // Default theme
-      toggleTheme: () =>
-        set((state) => ({
-          theme: state.theme === "dark" ? "light" : "dark", // Toggle between light and dark themes
-        })),
-    }),
-    {
-      name: "theme-store", // Key for local storage
-    }
-  )
-);
-
-export default useThemeStore;
-```
-
----
-
-## **6. Integration in App Component**
-
-Here’s how all the stores and components integrate in the main `App.js`.
-
-### **File:** `/App.js`
-```javascript
-import React, { useState } from "react";
-import useUserStore from "./stores/useUserStore";
-import SearchBar from "./components/SearchBar";
-import Desktop from "./components/Desktop";
-
-function App({ apiKey }) {
-  const user = useUserStore((state) => state.user); // Get user data
-  const [isDataFetched, setIsDataFetched] = useState(false); // Track whether data is fetched
-
-  const handleSearchComplete = () => setIsDataFetched(true); // Callback when search completes
-
-  return isDataFetched && user ? (
-    <Desktop /> // Show desktop if user and data are available
-  ) : (
-    <SearchBar onSearchComplete={handleSearchComplete} apiKey={apiKey} /> // Show search bar otherwise
-  );
-}
-
-export default App;
-```
-
----
-
-## **Summary**
-
-This setup includes:
-1. **Profile App:** Displays the user's profile and allows theme toggling.
-2. **User Store:** Manages and persists user data in local storage.
-3. **Activity Store:** Handles activity data dynamically without persistence.
-4. **App State Store:** Tracks the state of apps (open/close, position, size).
-5. **Theme Store:** Manages and persists the app's theme.
-
-Let me know if you need further clarifications or additional features!
+**You now have a production-ready modular setup for your app! All database code is omitted, and you can add it later. Local storage is enabled for user and theme data.**
