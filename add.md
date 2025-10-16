@@ -344,3 +344,39 @@ function App({ apiKey, env }) {
 ---
 
 Let me know if you need further helper functions, advanced schema for Cloudflare D1, or expanded worker/queue patterns!
+
+
+// Assume KV binding: env.USER_SUMMARIES
+
+const RATE_LIMIT_MINUTES = 30;
+
+export default {
+  async fetch(request, env) {
+    const { membershipId, dungeonId, activities } = await request.json();
+    const summaryKey = `fullClear:${membershipId}:${dungeonId}`;
+
+    // Get last run info from KV
+    const summaryStr = await env.USER_SUMMARIES.get(summaryKey);
+    let summary = summaryStr ? JSON.parse(summaryStr) : null;
+
+    const now = Date.now();
+    const lastRun = summary?.lastRun || 0;
+    const minutesSinceLastRun = (now - lastRun) / 1000 / 60;
+
+    if (summary && minutesSinceLastRun < RATE_LIMIT_MINUTES) {
+      // Return cached result if rate limit not exceeded
+      return new Response(JSON.stringify(summary), { headers: { "Content-Type": "application/json" } });
+    }
+
+    // Run full clear computation (your existing logic)
+    const result = await computeFullClears(activities, dungeonId, env.BUNGIE_API_KEY);
+
+    // Save result + time in KV
+    summary = { ...result, lastRun: now };
+    await env.USER_SUMMARIES.put(summaryKey, JSON.stringify(summary));
+
+    return new Response(JSON.stringify(summary), { headers: { "Content-Type": "application/json" } });
+  }
+}
+
+
