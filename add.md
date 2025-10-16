@@ -509,3 +509,293 @@ body {
 ---
 
 **You now have a production-ready modular setup for your app! All database code is omitted, and you can add it later. Local storage is enabled for user and theme data.**
+
+# **Comprehensive Setup Guide (Local Storage, Modular Helpers, Full Clears Worker, AppWindow Parent Component, No DB Yet)**
+
+This guide provides a full setup for your app, using local storage for user and theme data, modular helper functions for API calls, data cleaning, grouping, stat computation, a backend worker for full clears computation (which finds the fastest full clear and counts total full clears by checking every PGCR), and a **parent AppWindow component** for consistent app window styling and controls. **All database code is replaced with placeholders and not included.**
+
+---
+
+## **1. Folder/Project Structure**
+
+```
+src/
+├── components/
+│   ├── Desktop.js
+│   ├── Taskbar.js
+│   ├── SearchBar.js
+│   ├── AppWindow.js           # Parent window component for all apps
+├── apps/
+│   ├── ProfileApp.js
+├── stores/
+│   ├── useUserStore.js
+│   ├── useActivityStore.js
+│   ├── useAppStateStore.js
+│   ├── useThemeStore.js
+├── utils/
+│   ├── useGlobalLoading.js
+│   ├── types.js
+│   ├── api.js                 # API call helpers
+│   ├── activityHelpers.js     # Data cleaning, grouping, stat helpers
+├── styles/
+│   ├── global.css
+│   ├── AppWindow.css          # Styles for app window
+│   ├── Desktop.css
+│   ├── Taskbar.css
+│   ├── SearchBar.css
+│   ├── ProfileApp.css
+├── worker/
+│   ├── fullClearWorker.js     # Backend worker for full clears
+├── App.js
+└── index.js
+```
+
+---
+
+## **2. Parent AppWindow Component**
+
+### **File:** `/components/AppWindow.js`
+```javascript name=src/components/AppWindow.js
+import React from "react";
+import Draggable from "react-draggable";
+import { ResizableBox } from "react-resizable";
+import "react-resizable/css/styles.css";
+import "../styles/AppWindow.css";
+
+/**
+ * AppWindow: Parent window component for all apps.
+ * 
+ * Props:
+ * - title: string (window title)
+ * - children: React.ReactNode (window content)
+ * - width, height: initial size
+ * - minConstraints, maxConstraints: resizing constraints
+ * - onClose, onMinimize, onMaximize: callbacks for window actions
+ * - isMinimized, isMaximized, ...others as needed
+ */
+function AppWindow({
+  title,
+  children,
+  width = 400,
+  height = 300,
+  minConstraints = [300, 200],
+  maxConstraints = [800, 600],
+  onClose,
+  onMinimize,
+  onMaximize,
+  isMinimized = false,
+  isMaximized = false,
+  ...props
+}) {
+  return (
+    <Draggable grid={[20, 20]}>
+      <ResizableBox
+        width={isMaximized ? maxConstraints[0] : width}
+        height={isMaximized ? maxConstraints[1] : height}
+        minConstraints={minConstraints}
+        maxConstraints={maxConstraints}
+        handle={<span className="resize-handle" />}
+      >
+        <div className="app-window" {...props}>
+          <div className="app-window-header">
+            <span className="app-window-title">{title}</span>
+            <div className="app-window-controls">
+              <button onClick={onMinimize} title="Minimize">_</button>
+              <button onClick={onMaximize} title="Maximize">{isMaximized ? "🗗" : "🗖"}</button>
+              <button onClick={onClose} title="Close">×</button>
+            </div>
+          </div>
+          {!isMinimized && (
+            <div className="app-window-content">{children}</div>
+          )}
+        </div>
+      </ResizableBox>
+    </Draggable>
+  );
+}
+
+export default AppWindow;
+```
+
+---
+
+### **AppWindow Styles**
+- **File:** `/styles/AppWindow.css`
+```css name=src/styles/AppWindow.css
+.app-window {
+  background-color: #161b22;
+  color: white;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  position: relative;
+  box-shadow: 0 4px 8px rgba(0,0,0,0.5);
+}
+
+.app-window-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #22272e;
+  padding: 6px 12px;
+  font-weight: bold;
+  border-bottom: 1px solid #30363d;
+}
+
+.app-window-title {
+  flex: 1;
+}
+
+.app-window-controls button {
+  margin-left: 5px;
+  background: #30363d;
+  color: #fff;
+  border: none;
+  border-radius: 3px;
+  width: 28px;
+  height: 28px;
+  cursor: pointer;
+  font-size: 16px;
+}
+
+.app-window-controls button:hover {
+  background: #58a6ff;
+}
+
+.app-window-content {
+  padding: 16px;
+  overflow: auto;
+}
+
+.resize-handle {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  width: 12px;
+  height: 12px;
+  cursor: se-resize;
+}
+```
+
+---
+
+### **How to Use AppWindow in an App**
+
+#### **ProfileApp Example:**
+- **File:** `/apps/ProfileApp.js`
+```javascript name=src/apps/ProfileApp.js
+import React from "react";
+import useUserStore from "../stores/useUserStore";
+import useThemeStore from "../stores/useThemeStore";
+import AppWindow from "../components/AppWindow";
+
+function ProfileApp({ onClose, onMinimize, onMaximize, isMinimized, isMaximized }) {
+  const { user } = useUserStore();
+  const { theme, toggleTheme } = useThemeStore();
+  if (!user) return null;
+  return (
+    <AppWindow
+      title="User Profile"
+      onClose={onClose}
+      onMinimize={onMinimize}
+      onMaximize={onMaximize}
+      isMinimized={isMinimized}
+      isMaximized={isMaximized}
+    >
+      <img src={user.emblem} alt="User Emblem" className="profile-emblem" />
+      <p><strong>Username:</strong> {user.username}</p>
+      <p><strong>Platform:</strong> {user.platform}</p>
+      <p><strong>Current Theme:</strong> {theme}</p>
+      <button onClick={toggleTheme}>Toggle Theme</button>
+    </AppWindow>
+  );
+}
+
+export default ProfileApp;
+```
+
+---
+
+## **3. The Rest of Your Setup Remains**
+
+All other parts (zustand stores, API helpers, activity helpers, worker, etc.) remain as in the previous guide, **just replace the window content in your apps with the AppWindow parent**.
+
+---
+
+## **4. Setup Guides: Core Libraries**
+
+### **Zustand**
+```bash
+npm install zustand
+```
+- [Zustand Docs](https://docs.pmnd.rs/zustand/getting-started/introduction)
+
+---
+
+### **react-dnd**
+```bash
+npm install react-dnd react-dnd-html5-backend
+```
+- [React DnD Docs](https://react-dnd.github.io/react-dnd/about)
+- Example usage:
+  ```javascript
+  import { DndProvider } from 'react-dnd';
+  import { HTML5Backend } from 'react-dnd-html5-backend';
+
+  function App() {
+    return (
+      <DndProvider backend={HTML5Backend}>
+        <YourComponent />
+      </DndProvider>
+    );
+  }
+  ```
+
+---
+
+### **react-resizable**
+```bash
+npm install react-resizable
+```
+- [react-resizable Docs](https://www.npmjs.com/package/react-resizable)
+- Example usage:
+  ```javascript
+  import { ResizableBox } from "react-resizable";
+
+  <ResizableBox width={200} height={200} minConstraints={[100, 100]} maxConstraints={[300, 300]}>
+    <div>Resizable Content</div>
+  </ResizableBox>
+  ```
+
+---
+
+### **react-draggable**
+```bash
+npm install react-draggable
+```
+- [react-draggable Docs](https://www.npmjs.com/package/react-draggable)
+- Example usage:
+  ```javascript
+  import Draggable from "react-draggable";
+
+  <Draggable>
+    <div>Drag me!</div>
+  </Draggable>
+  ```
+
+---
+
+## **5. Global Styling**
+- **File:** `/styles/global.css`
+```css name=src/styles/global.css
+body {
+  margin: 0;
+  padding: 0;
+  font-family: Arial, sans-serif;
+  background-color: #0d1117;
+  color: white;
+}
+```
+
+---
+
+**You now have a production-ready modular setup for your app! All database code is omitted, and you can add it later. Local storage is enabled for user and theme data. All apps use the AppWindow parent for window controls and styling.**
