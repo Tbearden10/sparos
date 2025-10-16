@@ -1,11 +1,11 @@
-Below is the **comprehensive guide** to implement the full setup for your app with all necessary files, including **global CSS**, **login screen**, **desktop environment**, **taskbar**, **Profile/Settings App**, and the **Activity Store**. The final product will be a functional user search system, desktop environment, and app management system. The Activity Store will be ready but without a corresponding UI yet.
+# **Comprehensive Setup Guide**
+
+This guide provides the full setup for your app, including **global CSS**, **login screen**, **desktop environment**, **taskbar**, **Profile/Settings App**, and the **Activity Store**.  
+**UPDATED:** The Activity Store now stores activities grouped by dungeon as an array of dungeon objects (`{id, name, activities}`), includes global utility functions, types, and helpers wherever possible.
 
 ---
 
-# **Setup Guide**
-
 ## **1. Folder/Project Structure**
-We'll organize the project into the following structure:
 
 ```
 src/
@@ -22,6 +22,8 @@ src/
 │   ├── useThemeStore.js
 ├── utils/
 │   ├── useGlobalLoading.js
+│   ├── activityHelpers.js
+│   ├── types.js
 ├── styles/
 │   ├── global.css
 │   ├── Desktop.css
@@ -36,15 +38,80 @@ src/
 
 ## **2. Core Setup**
 
-### **2.1 Zustand Stores**
+### **2.1 Types**
+- **File:** `/utils/types.js`
+```javascript name=src/utils/types.js
+/** @typedef {Object} Activity
+ *  @property {string} dungeonId
+ *  @property {string} dungeonName
+ *  @property {string} [id]
+ *  @property {string} [date]
+ *  @property {number} [kills]
+ *  @property {number} [score]
+ *  @property {string} [otherFields]
+ */
+
+/** @typedef {Object} DungeonGroup
+ *  @property {string} id
+ *  @property {string} name
+ *  @property {Activity[]} activities
+ */
+```
+
+---
+
+### **2.2 Utility & Helper Functions**
+
+- **File:** `/utils/activityHelpers.js`
+```javascript name=src/utils/activityHelpers.js
+import { DungeonGroup, Activity } from "./types";
+
+/** Cleans and normalizes an activity object from API */
+export function cleanActivity(activity) {
+  return {
+    dungeonId: activity.dungeonId || "unknown",
+    dungeonName: activity.dungeonName || "Unknown Dungeon",
+    ...activity
+  };
+}
+
+/** Groups activities into an array of dungeon objects */
+export function groupActivitiesToDungeonArray(activities) {
+  const dungeonMap = {};
+  activities.forEach(activity => {
+    const dungeonId = activity.dungeonId;
+    const dungeonName = activity.dungeonName;
+    if (!dungeonMap[dungeonId]) {
+      dungeonMap[dungeonId] = {
+        id: dungeonId,
+        name: dungeonName,
+        activities: [],
+      };
+    }
+    dungeonMap[dungeonId].activities.push(activity);
+  });
+  return Object.values(dungeonMap);
+}
+
+/** Aggregate stats for a dungeon group */
+export function getDungeonStats(dungeon) {
+  return {
+    totalKills: dungeon.activities.reduce((sum, act) => sum + (act.kills || 0), 0),
+    totalScore: dungeon.activities.reduce((sum, act) => sum + (act.score || 0), 0),
+    totalActivities: dungeon.activities.length,
+  };
+}
+```
+
+---
+
+### **2.3 Zustand Stores**
 
 #### **User Store**
-Manages user data and state.
-- **File**: `/stores/useUserStore.js`
-```javascript
+- **File:** `/stores/useUserStore.js`
+```javascript name=src/stores/useUserStore.js
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-
 const API_BASE_URL = "https://www.bungie.net/Platform";
 
 const useUserStore = create(
@@ -53,23 +120,14 @@ const useUserStore = create(
       user: null,
       isLoading: false,
       error: null,
-
       fetchUser: async (username) => {
         set({ isLoading: true, error: null });
-
         try {
           const response = await fetch(`${API_BASE_URL}/User/SearchUsers/?q=${username}`, {
-            headers: {
-              "X-API-Key": "YOUR_BUNGIE_API_KEY",
-            },
+            headers: { "X-API-Key": "YOUR_BUNGIE_API_KEY" },
           });
-
-          if (!response.ok) {
-            throw new Error("Failed to fetch user data");
-          }
-
+          if (!response.ok) throw new Error("Failed to fetch user data");
           const data = await response.json();
-
           if (data && data.Response && data.Response.length > 0) {
             const user = data.Response[0];
             set({ user });
@@ -77,13 +135,11 @@ const useUserStore = create(
             throw new Error("No user found");
           }
         } catch (error) {
-          console.error(error);
           set({ error: error.message });
         } finally {
           set({ isLoading: false });
         }
       },
-
       resetUser: () => set({ user: null }),
     }),
     {
@@ -92,55 +148,56 @@ const useUserStore = create(
     }
   )
 );
-
 export default useUserStore;
 ```
 
 ---
 
-#### **Activity Store**
-Handles fetching and storing activity data.
-- **File**: `/stores/useActivityStore.js`
-```javascript
+#### **Activity Store (Array of Dungeon Groups with Helpers and Types)**
+- **File:** `/stores/useActivityStore.js`
+```javascript name=src/stores/useActivityStore.js
 import { create } from "zustand";
+import { cleanActivity, groupActivitiesToDungeonArray } from "../utils/activityHelpers";
 
 const API_BASE_URL = "https://www.bungie.net/Platform";
 
+/** Zustand store for activities grouped by dungeon */
 const useActivityStore = create((set) => ({
-  activities: [],
+  dungeons: [], // Array of { id, name, activities }
   isLoading: false,
   error: null,
 
   fetchActivities: async (userId) => {
     set({ isLoading: true, error: null });
-
     try {
-      const response = await fetch(`${API_BASE_URL}/Destiny2/Stats/ActivityHistory/${userId}/`, {
-        headers: {
-          "X-API-Key": "YOUR_BUNGIE_API_KEY",
-        },
-      });
+      let allActivities = [];
+      let page = 0;
+      let hasMore = true;
 
-      if (!response.ok) {
-        throw new Error("Failed to fetch activity data");
+      // Fetch up to 20 pages, 250 activities per page
+      while (hasMore && page < 20) {
+        const response = await fetch(
+          `${API_BASE_URL}/Destiny2/Stats/ActivityHistory/${userId}/?page=${page}&count=250`,
+          { headers: { "X-API-Key": "YOUR_BUNGIE_API_KEY" } }
+        );
+        if (!response.ok) throw new Error("Failed to fetch activity data");
+        const data = await response.json();
+        const activities = (data.Response?.activities || []).map(cleanActivity);
+        allActivities = [...allActivities, ...activities];
+        hasMore = activities.length === 250;
+        page += 1;
       }
 
-      const data = await response.json();
-
-      if (data && data.Response) {
-        set({ activities: data.Response.activities || [] });
-      } else {
-        throw new Error("No activity data found");
-      }
+      const grouped = groupActivitiesToDungeonArray(allActivities);
+      set({ dungeons: grouped });
     } catch (error) {
-      console.error(error);
       set({ error: error.message });
     } finally {
       set({ isLoading: false });
     }
   },
 
-  resetActivities: () => set({ activities: [] }),
+  resetActivities: () => set({ dungeons: [] }),
 }));
 
 export default useActivityStore;
@@ -149,24 +206,17 @@ export default useActivityStore;
 ---
 
 #### **App State Store**
-Manages app visibility, position, and size.
-- **File**: `/stores/useAppStateStore.js`
-```javascript
+- **File:** `/stores/useAppStateStore.js`
+```javascript name=src/stores/useAppStateStore.js
 import { create } from "zustand";
-
 const useAppStateStore = create((set) => ({
   apps: {
     ProfileApp: { isOpen: false, isMinimized: false, position: { x: 100, y: 100 }, size: { width: 400, height: 300 } },
   },
-
   toggleApp: (appName) =>
     set((state) => ({
-      apps: {
-        ...state.apps,
-        [appName]: { ...state.apps[appName], isOpen: !state.apps[appName].isOpen },
-      },
+      apps: { ...state.apps, [appName]: { ...state.apps[appName], isOpen: !state.apps[appName].isOpen } },
     })),
-
   resetAppState: () =>
     set({
       apps: {
@@ -174,19 +224,16 @@ const useAppStateStore = create((set) => ({
       },
     }),
 }));
-
 export default useAppStateStore;
 ```
 
 ---
 
 #### **Theme Store**
-Manages theme settings and persists them.
-- **File**: `/stores/useThemeStore.js`
-```javascript
+- **File:** `/stores/useThemeStore.js`
+```javascript name=src/stores/useThemeStore.js
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-
 const useThemeStore = create(
   persist(
     (set) => ({
@@ -199,19 +246,18 @@ const useThemeStore = create(
     { name: "theme-storage" }
   )
 );
-
 export default useThemeStore;
 ```
 
 ---
 
-### **2.2 Global Loading Utility**
-Combines the loading states from multiple stores.
-- **File**: `/utils/useGlobalLoading.js`
-```javascript
+### **2.4 Global Loading Utility**
+- **File:** `/utils/useGlobalLoading.js`
+```javascript name=src/utils/useGlobalLoading.js
 import useUserStore from "../stores/useUserStore";
 import useActivityStore from "../stores/useActivityStore";
 
+/** Returns true if any global loading state is active */
 export default function useGlobalLoading() {
   const userLoading = useUserStore((state) => state.isLoading);
   const activityLoading = useActivityStore((state) => state.isLoading);
@@ -224,9 +270,8 @@ export default function useGlobalLoading() {
 ## **3. Components**
 
 ### **3.1 Search Bar**
-The login screen for user search.
-- **File**: `/components/SearchBar.js`
-```javascript
+- **File:** `/components/SearchBar.js`
+```javascript name=src/components/SearchBar.js
 import React, { useState } from "react";
 import useUserStore from "../stores/useUserStore";
 import useActivityStore from "../stores/useActivityStore";
@@ -240,12 +285,9 @@ function SearchBar({ onSearchComplete }) {
 
   const handleSearch = async () => {
     if (username.trim() === "") return;
-
     resetUser();
     resetActivities();
-
     await fetchUser(username);
-
     const user = useUserStore.getState().user;
     if (user && user.membershipId) {
       await fetchActivities(user.membershipId);
@@ -277,9 +319,8 @@ export default SearchBar;
 ---
 
 ### **3.2 Desktop**
-The desktop environment for managing apps.
-- **File**: `/components/Desktop.js`
-```javascript
+- **File:** `/components/Desktop.js`
+```javascript name=src/components/Desktop.js
 import React from "react";
 import useAppStateStore from "../stores/useAppStateStore";
 import ProfileApp from "../apps/ProfileApp";
@@ -287,7 +328,6 @@ import Taskbar from "./Taskbar";
 
 function Desktop() {
   const { apps } = useAppStateStore();
-
   return (
     <div className="desktop">
       {apps.ProfileApp.isOpen && <ProfileApp />}
@@ -302,15 +342,13 @@ export default Desktop;
 ---
 
 ### **3.3 Taskbar**
-Manages app visibility and status.
-- **File**: `/components/Taskbar.js`
-```javascript
+- **File:** `/components/Taskbar.js`
+```javascript name=src/components/Taskbar.js
 import React from "react";
 import useAppStateStore from "../stores/useAppStateStore";
 
 function Taskbar() {
   const { apps, toggleApp } = useAppStateStore();
-
   return (
     <div className="taskbar">
       {Object.keys(apps).map((appName) => (
@@ -332,9 +370,8 @@ export default Taskbar;
 ---
 
 ### **3.4 Profile/Settings App**
-Displays user info and manages theme settings.
-- **File**: `/apps/ProfileApp.js`
-```javascript
+- **File:** `/apps/ProfileApp.js`
+```javascript name=src/apps/ProfileApp.js
 import React from "react";
 import Draggable from "react-draggable";
 import { ResizableBox } from "react-resizable";
@@ -345,9 +382,7 @@ import useThemeStore from "../stores/useThemeStore";
 function ProfileApp() {
   const { user } = useUserStore();
   const { theme, toggleTheme } = useThemeStore();
-
   if (!user) return null;
-
   return (
     <Draggable grid={[20, 20]}>
       <ResizableBox width={400} height={300} minConstraints={[300, 200]} maxConstraints={[800, 600]}>
@@ -370,9 +405,8 @@ export default ProfileApp;
 ---
 
 ## **4. App Component**
-Handles the transition between the login screen and desktop.
-- **File**: `/App.js`
-```javascript
+- **File:** `/App.js`
+```javascript name=src/App.js
 import React, { useState } from "react";
 import useUserStore from "./stores/useUserStore";
 import SearchBar from "./components/SearchBar";
@@ -381,11 +415,7 @@ import Desktop from "./components/Desktop";
 function App() {
   const user = useUserStore((state) => state.user);
   const [isDataFetched, setIsDataFetched] = useState(false);
-
-  const handleSearchComplete = () => {
-    setIsDataFetched(true);
-  };
-
+  const handleSearchComplete = () => setIsDataFetched(true);
   return isDataFetched && user ? <Desktop /> : <SearchBar onSearchComplete={handleSearchComplete} />;
 }
 
@@ -395,8 +425,8 @@ export default App;
 ---
 
 ## **5. Global Styling**
-- **File**: `/styles/global.css`
-```css
+- **File:** `/styles/global.css`
+```css name=src/styles/global.css
 body {
   margin: 0;
   padding: 0;
@@ -420,4 +450,10 @@ body {
 
 ---
 
-This guide provides everything needed to create a fully functional app including a **login screen**, **desktop environment**, **Profile/Settings App**, and **Activity Store** (ready for future apps). Let me know if you’d like help adding additional features!
+## **Summary of Activity Store Approach**
+
+- **Activities are stored as an array of dungeon objects** (`{id, name, activities}`) for efficient grouping and stat calculation.
+- **Types and helper utilities** are used for data normalization, grouping, and stat aggregation.
+- **Global loading utility** and consistent modular structure across the app.
+
+Let me know if you’d like example UI for dungeon stats or integrating new features!
