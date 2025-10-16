@@ -1,7 +1,7 @@
 # **Comprehensive Setup Guide**
 
 This guide provides the full setup for your app, including **global CSS**, **login screen**, **desktop environment**, **taskbar**, **Profile/Settings App**, and the **Activity Store**.  
-**UPDATED:** The Activity Store now stores activities grouped by dungeon as an array of dungeon objects (`{id, name, activities}`), includes global utility functions, types, and helpers wherever possible.
+**UPDATED:** Activity data is not permanent, and all "fastest full clear" computations are offloaded to backend workers (e.g., Cloudflare Worker). The front end simply fetches activities, displays them, and triggers the worker for stat computation. Activity Store remains grouped by dungeon as an array of dungeon objects (`{id, name, activities}`), and includes global utility functions, types, and helpers.
 
 ---
 
@@ -30,6 +30,8 @@ src/
 │   ├── Taskbar.css
 │   ├── SearchBar.css
 │   ├── ProfileApp.css
+├── worker/
+│   ├── fullClearWorker.js
 ├── App.js
 └── index.js
 ```
@@ -267,6 +269,65 @@ export default function useGlobalLoading() {
 
 ---
 
+### **2.5 Full Clear Worker (Backend Worker/Cloudflare Worker)**
+
+- **File:** `/worker/fullClearWorker.js`
+```javascript name=src/worker/fullClearWorker.js
+/**
+ * Example: Cloudflare Worker for Fastest Full Clear Stat
+ * This worker receives a job payload with dungeon activities,
+ * checks PGCRs, and returns the fastest full clear result.
+ *
+ * This avoids function invocation timeouts and keeps the frontend responsive.
+ */
+
+// Cloudflare Worker entry (pseudo-code)
+export default {
+  async fetch(request, env, ctx) {
+    const { dungeonId, activityIds, userId } = await request.json();
+
+    let fastestClear = null;
+
+    for (const activityId of activityIds) {
+      // Fetch PGCR from Bungie API
+      const pgcrResp = await fetch(`https://www.bungie.net/Platform/Destiny2/Stats/PostGameCarnageReport/${activityId}/`, {
+        headers: { "X-API-Key": env.BUNGIE_API_KEY }
+      });
+      if (!pgcrResp.ok) continue;
+      const pgcr = await pgcrResp.json();
+
+      // Check if PGCR represents a full clear (implement your logic)
+      if (isFullClear(pgcr, dungeonId)) {
+        const clearTime = getClearTime(pgcr);
+        if (!fastestClear || clearTime < fastestClear.clearTime) {
+          fastestClear = { activityId, clearTime, pgcr };
+        }
+      }
+      // Optionally, yield/break up work here for batching/queue processing
+    }
+
+    // Save result to storage or return to client
+    return new Response(JSON.stringify({ dungeonId, userId, fastestClear }), {
+      headers: { "Content-Type": "application/json" }
+    });
+  }
+}
+
+/** Helper: Determine if PGCR is a full clear */
+function isFullClear(pgcr, dungeonId) {
+  // Implement dungeon-specific logic, e.g., all bosses defeated
+  return true; // Replace with real logic
+}
+
+/** Helper: Extract clear time from PGCR */
+function getClearTime(pgcr) {
+  // Implement clear time extraction logic
+  return pgcr.Response.activityDetails.clearTimeSeconds || 0;
+}
+```
+
+---
+
 ## **3. Components**
 
 ### **3.1 Search Bar**
@@ -291,6 +352,11 @@ function SearchBar({ onSearchComplete }) {
     const user = useUserStore.getState().user;
     if (user && user.membershipId) {
       await fetchActivities(user.membershipId);
+
+      // Kick off fastest full clear computation (trigger worker)
+      // Example POST to worker:
+      // fetch('/worker/fullClearWorker', { method: 'POST', body: JSON.stringify({ dungeonId, activityIds, userId: user.membershipId }) });
+
       onSearchComplete();
     }
   };
@@ -450,10 +516,12 @@ body {
 
 ---
 
-## **Summary of Activity Store Approach**
+## **Summary of Backend Worker Full Clears**
 
-- **Activities are stored as an array of dungeon objects** (`{id, name, activities}`) for efficient grouping and stat calculation.
-- **Types and helper utilities** are used for data normalization, grouping, and stat aggregation.
-- **Global loading utility** and consistent modular structure across the app.
+- **Activity data is not permanent; no local storage needed.**
+- **Fastest full clear stats are computed by backend workers** (Cloudflare Worker or similar).
+- **Frontend simply triggers the worker after activities are fetched and displays data when ready.**
+- **No risk of timeout or blocking UI.**
+- **Modular: You can swap backend implementation or optimize batching as needed.**
 
-Let me know if you’d like example UI for dungeon stats or integrating new features!
+Let me know if you’d like example UI for dungeon stats, integrating worker responses, or more details on backend worker orchestration!
