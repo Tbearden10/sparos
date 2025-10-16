@@ -1,0 +1,51 @@
+1. clean current code 
+2. header with search bar
+3. footer
+4. main layout
+5. user card
+6. most recent activity
+7. timer
+8. no more
+
+
+[User Input]
+     │
+     ▼
+[SearchBar Component]
+     │
+     ▼
+[handleSearch in SearchContext]
+     │
+     ├─ fetchBungieUser(query)  ← in src/api/bungie.ts
+     │        │
+     │        ▼
+     │   Real API Call (fetch/axios to Bungie API endpoint)
+     │        │
+     │        ▼
+     │   Bungie API Response (raw user data)
+     │        │
+     │        ▼
+     ├─ cleanBungieData(rawData) ← in src/utils/cleanBungieData.ts
+     │        │
+     │        ▼
+     │   Cleaned user data
+     │
+     ├─ fetchUserStats(userId)   ← in src/api/bungie.ts (optional)
+     │        │
+     │        ▼
+     │   Real API Call (fetch/axios to Bungie stats endpoint)
+     │        │
+     │        ▼
+     │   Bungie stats response (raw stats)
+     │        │
+     │        ▼
+     ├─ cleanStats(rawStats)     ← in src/utils/cleanStats.ts (optional)
+     │        │
+     │        ▼
+     │   Cleaned stats data
+     │
+     ▼
+[Set results and stats in Context]
+     │
+     ▼
+[Components (UserCard, Stats, etc.) display real data from context]

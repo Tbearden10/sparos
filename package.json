@@ -1,9 +1,9 @@
 {
-	"name": "vite-react-template",
+	"name": "spar",
 	"description": "A template for building a React application with Vite, Hono, and Cloudflare Workers",
 	"private": true,
 	"cloudflare": {
-		"label": "Vite React Template",
+		"label": "Spar",
 		"products": [
 			"Workers"
 		],
@@ -13,7 +13,7 @@
 		"publish": true
 	},
 	"dependencies": {
-		"hono": "4.8.2",
+		"hono": "^4.9.12",
 		"react": "19.0.0",
 		"react-dom": "19.0.0"
 	},

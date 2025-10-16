@@ -1,0 +1,10 @@
+.footer {
+  width: 100%;
+  background: var(--secondary);
+  color: var(--primary);
+  text-align: center;
+  font-weight: 600;
+  padding: 1rem 0;
+  border-top: 2px solid var(--border);
+  margin-top: auto;
+}
