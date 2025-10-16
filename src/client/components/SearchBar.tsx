@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useSearch } from "../../context/SearchContext";
+import { useSearch } from "../context/SearchContext";
 import "../../styles/SearchBar.css"
 
 function SearchBar() {

@@ -1,9 +1,9 @@
 {
-	"name": "spar",
+	"name": "sparos",
 	"description": "A template for building a React application with Vite, Hono, and Cloudflare Workers",
 	"private": true,
 	"cloudflare": {
-		"label": "Spar",
+		"label": "sparos",
 		"products": [
 			"Workers"
 		],
@@ -13,9 +13,15 @@
 		"publish": true
 	},
 	"dependencies": {
+		"framer-motion": "^12.23.24",
 		"hono": "^4.9.12",
 		"react": "19.0.0",
-		"react-dom": "19.0.0"
+		"react-dnd": "^16.0.1",
+		"react-dnd-html5-backend": "^16.0.1",
+		"react-dom": "19.0.0",
+		"react-draggable": "^4.5.0",
+		"react-resizable": "^3.0.5",
+		"zustand": "^5.0.8"
 	},
 	"devDependencies": {
 		"@cloudflare/vite-plugin": "1.7.5",
