@@ -1,0 +1,423 @@
+Below is the **comprehensive guide** to implement the full setup for your app with all necessary files, including **global CSS**, **login screen**, **desktop environment**, **taskbar**, **Profile/Settings App**, and the **Activity Store**. The final product will be a functional user search system, desktop environment, and app management system. The Activity Store will be ready but without a corresponding UI yet.
+
+---
+
+# **Setup Guide**
+
+## **1. Folder/Project Structure**
+We'll organize the project into the following structure:
+
+```
+src/
+├── components/
+│   ├── Desktop.js
+│   ├── Taskbar.js
+│   ├── SearchBar.js
+├── apps/
+│   ├── ProfileApp.js
+├── stores/
+│   ├── useUserStore.js
+│   ├── useActivityStore.js
+│   ├── useAppStateStore.js
+│   ├── useThemeStore.js
+├── utils/
+│   ├── useGlobalLoading.js
+├── styles/
+│   ├── global.css
+│   ├── Desktop.css
+│   ├── Taskbar.css
+│   ├── SearchBar.css
+│   ├── ProfileApp.css
+├── App.js
+└── index.js
+```
+
+---
+
+## **2. Core Setup**
+
+### **2.1 Zustand Stores**
+
+#### **User Store**
+Manages user data and state.
+- **File**: `/stores/useUserStore.js`
+```javascript
+import { create } from "zustand";
+import { persist } from "zustand/middleware";
+
+const API_BASE_URL = "https://www.bungie.net/Platform";
+
+const useUserStore = create(
+  persist(
+    (set, get) => ({
+      user: null,
+      isLoading: false,
+      error: null,
+
+      fetchUser: async (username) => {
+        set({ isLoading: true, error: null });
+
+        try {
+          const response = await fetch(`${API_BASE_URL}/User/SearchUsers/?q=${username}`, {
+            headers: {
+              "X-API-Key": "YOUR_BUNGIE_API_KEY",
+            },
+          });
+
+          if (!response.ok) {
+            throw new Error("Failed to fetch user data");
+          }
+
+          const data = await response.json();
+
+          if (data && data.Response && data.Response.length > 0) {
+            const user = data.Response[0];
+            set({ user });
+          } else {
+            throw new Error("No user found");
+          }
+        } catch (error) {
+          console.error(error);
+          set({ error: error.message });
+        } finally {
+          set({ isLoading: false });
+        }
+      },
+
+      resetUser: () => set({ user: null }),
+    }),
+    {
+      name: "user-store",
+      partialize: (state) => ({ user: state.user }),
+    }
+  )
+);
+
+export default useUserStore;
+```
+
+---
+
+#### **Activity Store**
+Handles fetching and storing activity data.
+- **File**: `/stores/useActivityStore.js`
+```javascript
+import { create } from "zustand";
+
+const API_BASE_URL = "https://www.bungie.net/Platform";
+
+const useActivityStore = create((set) => ({
+  activities: [],
+  isLoading: false,
+  error: null,
+
+  fetchActivities: async (userId) => {
+    set({ isLoading: true, error: null });
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/Destiny2/Stats/ActivityHistory/${userId}/`, {
+        headers: {
+          "X-API-Key": "YOUR_BUNGIE_API_KEY",
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to fetch activity data");
+      }
+
+      const data = await response.json();
+
+      if (data && data.Response) {
+        set({ activities: data.Response.activities || [] });
+      } else {
+        throw new Error("No activity data found");
+      }
+    } catch (error) {
+      console.error(error);
+      set({ error: error.message });
+    } finally {
+      set({ isLoading: false });
+    }
+  },
+
+  resetActivities: () => set({ activities: [] }),
+}));
+
+export default useActivityStore;
+```
+
+---
+
+#### **App State Store**
+Manages app visibility, position, and size.
+- **File**: `/stores/useAppStateStore.js`
+```javascript
+import { create } from "zustand";
+
+const useAppStateStore = create((set) => ({
+  apps: {
+    ProfileApp: { isOpen: false, isMinimized: false, position: { x: 100, y: 100 }, size: { width: 400, height: 300 } },
+  },
+
+  toggleApp: (appName) =>
+    set((state) => ({
+      apps: {
+        ...state.apps,
+        [appName]: { ...state.apps[appName], isOpen: !state.apps[appName].isOpen },
+      },
+    })),
+
+  resetAppState: () =>
+    set({
+      apps: {
+        ProfileApp: { isOpen: false, isMinimized: false, position: { x: 100, y: 100 }, size: { width: 400, height: 300 } },
+      },
+    }),
+}));
+
+export default useAppStateStore;
+```
+
+---
+
+#### **Theme Store**
+Manages theme settings and persists them.
+- **File**: `/stores/useThemeStore.js`
+```javascript
+import { create } from "zustand";
+import { persist } from "zustand/middleware";
+
+const useThemeStore = create(
+  persist(
+    (set) => ({
+      theme: "dark",
+      toggleTheme: () =>
+        set((state) => ({
+          theme: state.theme === "dark" ? "light" : "dark",
+        })),
+    }),
+    { name: "theme-storage" }
+  )
+);
+
+export default useThemeStore;
+```
+
+---
+
+### **2.2 Global Loading Utility**
+Combines the loading states from multiple stores.
+- **File**: `/utils/useGlobalLoading.js`
+```javascript
+import useUserStore from "../stores/useUserStore";
+import useActivityStore from "../stores/useActivityStore";
+
+export default function useGlobalLoading() {
+  const userLoading = useUserStore((state) => state.isLoading);
+  const activityLoading = useActivityStore((state) => state.isLoading);
+  return userLoading || activityLoading;
+}
+```
+
+---
+
+## **3. Components**
+
+### **3.1 Search Bar**
+The login screen for user search.
+- **File**: `/components/SearchBar.js`
+```javascript
+import React, { useState } from "react";
+import useUserStore from "../stores/useUserStore";
+import useActivityStore from "../stores/useActivityStore";
+import useGlobalLoading from "../utils/useGlobalLoading";
+
+function SearchBar({ onSearchComplete }) {
+  const [username, setUsername] = useState("");
+  const { fetchUser, resetUser } = useUserStore();
+  const { fetchActivities, resetActivities } = useActivityStore();
+  const isLoading = useGlobalLoading();
+
+  const handleSearch = async () => {
+    if (username.trim() === "") return;
+
+    resetUser();
+    resetActivities();
+
+    await fetchUser(username);
+
+    const user = useUserStore.getState().user;
+    if (user && user.membershipId) {
+      await fetchActivities(user.membershipId);
+      onSearchComplete();
+    }
+  };
+
+  return (
+    <div className="search-bar-container">
+      <input
+        type="text"
+        value={username}
+        onChange={(e) => setUsername(e.target.value)}
+        placeholder="Enter username..."
+        className="search-bar"
+        disabled={isLoading}
+      />
+      <button onClick={handleSearch} className="search-button" disabled={isLoading}>
+        {isLoading ? "Loading..." : "Search"}
+      </button>
+      {isLoading && <p className="loading-message">Fetching data, please wait...</p>}
+    </div>
+  );
+}
+
+export default SearchBar;
+```
+
+---
+
+### **3.2 Desktop**
+The desktop environment for managing apps.
+- **File**: `/components/Desktop.js`
+```javascript
+import React from "react";
+import useAppStateStore from "../stores/useAppStateStore";
+import ProfileApp from "../apps/ProfileApp";
+import Taskbar from "./Taskbar";
+
+function Desktop() {
+  const { apps } = useAppStateStore();
+
+  return (
+    <div className="desktop">
+      {apps.ProfileApp.isOpen && <ProfileApp />}
+      <Taskbar />
+    </div>
+  );
+}
+
+export default Desktop;
+```
+
+---
+
+### **3.3 Taskbar**
+Manages app visibility and status.
+- **File**: `/components/Taskbar.js`
+```javascript
+import React from "react";
+import useAppStateStore from "../stores/useAppStateStore";
+
+function Taskbar() {
+  const { apps, toggleApp } = useAppStateStore();
+
+  return (
+    <div className="taskbar">
+      {Object.keys(apps).map((appName) => (
+        <button
+          key={appName}
+          onClick={() => toggleApp(appName)}
+          className={apps[appName].isOpen ? "taskbar-button active" : "taskbar-button"}
+        >
+          {appName}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+export default Taskbar;
+```
+
+---
+
+### **3.4 Profile/Settings App**
+Displays user info and manages theme settings.
+- **File**: `/apps/ProfileApp.js`
+```javascript
+import React from "react";
+import Draggable from "react-draggable";
+import { ResizableBox } from "react-resizable";
+import "react-resizable/css/styles.css";
+import useUserStore from "../stores/useUserStore";
+import useThemeStore from "../stores/useThemeStore";
+
+function ProfileApp() {
+  const { user } = useUserStore();
+  const { theme, toggleTheme } = useThemeStore();
+
+  if (!user) return null;
+
+  return (
+    <Draggable grid={[20, 20]}>
+      <ResizableBox width={400} height={300} minConstraints={[300, 200]} maxConstraints={[800, 600]}>
+        <div className="app-window">
+          <h2>User Profile</h2>
+          <img src={user.emblem} alt="User Emblem" className="profile-emblem" />
+          <p>Username: {user.username}</p>
+          <p>Platform: {user.platform}</p>
+          <p>Current Theme: {theme}</p>
+          <button onClick={toggleTheme}>Toggle Theme</button>
+        </div>
+      </ResizableBox>
+    </Draggable>
+  );
+}
+
+export default ProfileApp;
+```
+
+---
+
+## **4. App Component**
+Handles the transition between the login screen and desktop.
+- **File**: `/App.js`
+```javascript
+import React, { useState } from "react";
+import useUserStore from "./stores/useUserStore";
+import SearchBar from "./components/SearchBar";
+import Desktop from "./components/Desktop";
+
+function App() {
+  const user = useUserStore((state) => state.user);
+  const [isDataFetched, setIsDataFetched] = useState(false);
+
+  const handleSearchComplete = () => {
+    setIsDataFetched(true);
+  };
+
+  return isDataFetched && user ? <Desktop /> : <SearchBar onSearchComplete={handleSearchComplete} />;
+}
+
+export default App;
+```
+
+---
+
+## **5. Global Styling**
+- **File**: `/styles/global.css`
+```css
+body {
+  margin: 0;
+  padding: 0;
+  font-family: Arial, sans-serif;
+  background-color: #0d1117;
+  color: white;
+}
+```
+
+---
+
+## **6. Run the Project**
+1. Install dependencies:
+   ```bash
+   npm install zustand react-draggable react-resizable
+   ```
+2. Start the development server:
+   ```bash
+   npm start
+   ```
+
+---
+
+This guide provides everything needed to create a fully functional app including a **login screen**, **desktop environment**, **Profile/Settings App**, and **Activity Store** (ready for future apps). Let me know if you’d like help adding additional features!
