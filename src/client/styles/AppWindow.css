@@ -48,7 +48,6 @@
   height: 34px;
   margin-left: 2px;
   cursor: pointer;
-  transition: background 0.12s, color 0.12s;
   box-shadow: none;
 }
 
@@ -68,4 +67,27 @@
 
 .resize-handle {
   display: none !important; /* Hide default handle */
+}
+
+.window-btn {
+  background: var(--button-bg);
+  color: var(--button-fg);
+  border: none;
+  padding: 0.3em 0.7em;
+  font-size: 1.1em;
+  margin-left: 0.3em;
+  cursor: pointer;
+}
+.window-btn:hover {
+  background: var(--button-hover);
+}
+.app-window-header {
+  background: var(--window-header-bg);
+  color: var(--window-header-fg);
+}
+.app-window {
+  background: var(--window-bg);
+  border: 1px solid var(--window-border);
+  border-radius: 4px;
+  overflow: hidden;
 }

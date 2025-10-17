@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { persist } from "zustand/middleware";
 
 type AppWindowState = {
   isOpen: boolean;
@@ -19,6 +20,7 @@ interface AppState {
   minimizeApp: (appName: string) => void;
   maximizeApp: (appName: string) => void;
   restoreApp: (appName: string) => void;
+  moveApp: (appName: string, x: number, y: number) => void;
   resetAppState: () => void;
 }
 
@@ -30,63 +32,64 @@ const initialApps: AppsMap = {
     position: { x: 100, y: 100 },
     size: { width: 400, height: 300 },
   },
-  // Add other apps here as needed
+  // ...other apps
 };
 
-export const useAppStateStore = create<AppState>((set) => ({
-  apps: initialApps,
-  openApp: (appName: string) =>
-    set((state) => {
-      console.log("[openApp]", appName, state.apps[appName]);
-      return {
-        apps: {
-          ...state.apps,
-          [appName]: { ...state.apps[appName], isOpen: true, isMinimized: false },
-        },
-      };
+export const useAppStateStore = create<AppState>()(
+  persist(
+    (set) => ({
+      apps: initialApps,
+      openApp: (appName: string) =>
+        set((state) => ({
+          apps: {
+            ...state.apps,
+            [appName]: { ...state.apps[appName], isOpen: true, isMinimized: false },
+          },
+        })),
+      closeApp: (appName: string) =>
+        set((state) => ({
+          apps: {
+            ...state.apps,
+            [appName]: { ...state.apps[appName], isOpen: false },
+          },
+        })),
+      minimizeApp: (appName: string) =>
+        set((state) => ({
+          apps: {
+            ...state.apps,
+            [appName]: { ...state.apps[appName], isMinimized: true },
+          },
+        })),
+      maximizeApp: (appName: string) =>
+        set((state) => ({
+          apps: {
+            ...state.apps,
+            [appName]: { ...state.apps[appName], isMaximized: true },
+          },
+        })),
+      restoreApp: (appName: string) =>
+        set((state) => ({
+          apps: {
+            ...state.apps,
+            [appName]: { ...state.apps[appName], isMinimized: false, isMaximized: false },
+          },
+        })),
+      moveApp: (appName: string, x: number, y: number) =>
+        set((state) => ({
+          apps: {
+            ...state.apps,
+            [appName]: { ...state.apps[appName], position: { x, y } },
+          },
+        })),
+      resetAppState: () => ({ apps: initialApps }),
     }),
-  closeApp: (appName: string) =>
-    set((state) => {
-      console.log("[closeApp]", appName, state.apps[appName]);
-      return {
+    {
+      name: "app-state",
+      partialize: (state) => ({
         apps: {
-          ...state.apps,
-          [appName]: { ...state.apps[appName], isOpen: false },
-        },
-      };
-    }),
-  minimizeApp: (appName: string) =>
-    set((state) => {
-      console.log("[minimizeApp]", appName, state.apps[appName]);
-      return {
-        apps: {
-          ...state.apps,
-          [appName]: { ...state.apps[appName], isMinimized: true },
-        },
-      };
-    }),
-  maximizeApp: (appName: string) =>
-    set((state) => {
-      console.log("[maximizeApp]", appName, state.apps[appName]);
-      return {
-        apps: {
-          ...state.apps,
-          [appName]: { ...state.apps[appName], isMaximized: true },
-        },
-      };
-    }),
-  restoreApp: (appName: string) =>
-    set((state) => {
-      console.log("[restoreApp]", appName, state.apps[appName]);
-      return {
-        apps: {
-          ...state.apps,
-          [appName]: { ...state.apps[appName], isMinimized: false, isMaximized: false },
-        },
-      };
-    }),
-  resetAppState: () => {
-    console.log("[resetAppState]", initialApps);
-    return { apps: initialApps };
-  },
-}));
+          ProfileApp: state.apps.ProfileApp
+        }
+      }),
+    }
+  )
+);

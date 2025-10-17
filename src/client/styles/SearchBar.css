@@ -34,7 +34,6 @@
   border-radius: 3px;
   font-weight: 600;
   cursor: pointer;
-  transition: background 0.18s;
 }
 .searchbar-btn:disabled {
   background: var(--button-hover);
