@@ -1,0 +1,35 @@
+.taskbar {
+  width: 100vw;
+  height: 44px;
+  background: var(--taskbar-bg);
+  color: var(--taskbar-fg);
+  display: flex;
+  align-items: center;
+  border-top: 1px solid var(--window-border);
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  z-index: 50;
+  user-select: none;
+  box-shadow: 0 -1px 6px #000a;
+}
+
+.taskbar-icon {
+  background: none;
+  border: none;
+  color: var(--taskbar-fg);
+  font-size: 1.5rem;
+  margin: 0 0.8rem;
+  cursor: pointer;
+  outline: none;
+  height: 100%;
+  padding: 0 12px;
+  border-bottom: 2px solid transparent;
+  transition: border-color 0.1s, background 0.1s;
+}
+
+.taskbar-icon.active, .taskbar-icon:focus, .taskbar-icon:hover {
+  background: var(--window-header-bg);
+  border-bottom: 2px solid var(--accent);
+  color: var(--accent);
+}

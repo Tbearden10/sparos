@@ -1,0 +1,71 @@
+.app-window {
+  width: 100%;
+  height: 100%;
+  background: var(--window-bg);
+  border: 2px solid var(--window-border);
+  box-shadow: 0 4px 24px #0008, 0 0 0 1.5px var(--window-header-bg) inset;
+  color: var(--window-header-fg);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-width: 220px;
+  min-height: 120px;
+}
+
+.app-window-header {
+  background: var(--window-header-bg);
+  color: var(--window-header-fg);
+  display: flex;
+  align-items: center;
+  padding: 0 18px;
+  height: 44px;
+  border-bottom: 1.5px solid var(--window-border);
+  font-weight: 500;
+  user-select: none;
+  letter-spacing: 0.03em;
+}
+
+.app-window-title {
+  flex: 1 1 auto;
+  font-size: 1.1rem;
+  font-weight: 600;
+  text-shadow: none;
+}
+
+.app-window-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.app-window-controls button {
+  background: var(--button-bg);
+  color: var(--button-fg);
+  border: none;
+  outline: none;
+  font-size: 1.15rem;
+  width: 34px;
+  height: 34px;
+  margin-left: 2px;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+  box-shadow: none;
+}
+
+.app-window-controls button:hover {
+  background: var(--accent-hover);
+  color: #fff;
+}
+
+.app-window-content {
+  flex: 1 1 auto;
+  padding: 1.5rem 1.5rem 1.5rem 1.5rem;
+  background: var(--window-bg);
+  overflow: auto;
+  color: var(--window-header-fg);
+  font-size: 1.05rem;
+}
+
+.resize-handle {
+  display: none !important; /* Hide default handle */
+}

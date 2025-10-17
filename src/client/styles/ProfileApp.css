@@ -1,0 +1,21 @@
+.profileapp-info {
+  color: var(--profileapp-theme-fg);
+  background: transparent;
+  font-size: 1.1rem;
+  margin-bottom: 2rem;
+}
+
+.profileapp-theme-toggle {
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  padding: 0.7rem 1.3rem;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+
+.profileapp-theme-toggle:hover {
+  background: var(--accent-hover);
+}
