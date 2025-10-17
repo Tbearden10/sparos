@@ -1,7 +1,6 @@
 import { useEffect } from "react";
 import { useThemeStore } from "./stores/useThemeStore";
 import { useAppStateStore } from "./stores/useAppStateStore";
-import ThemeButton from "./components/ThemeButton";
 import Desktop from "./components/Desktop";
 import Taskbar from "./components/Taskbar";
 import SearchBar from "./components/SearchBar";
@@ -24,7 +23,6 @@ function Sparos() {
 
   return (
     <>
-      <ThemeButton />
       {!user ? (
         <div className="page-layout login-screen">
           <div className="login-header">

@@ -9,7 +9,6 @@ function ProfileApp() {
   const profileApp = useAppStateStore(state => state.apps.ProfileApp);
   const closeApp = useAppStateStore(state => state.closeApp);
   const minimizeApp = useAppStateStore(state => state.minimizeApp);
-  const maximizeApp = useAppStateStore(state => state.maximizeApp);
   const moveApp = useAppStateStore(state => state.moveApp);
 
   if (!user) return null;
@@ -19,11 +18,9 @@ function ProfileApp() {
       title="User Profile"
       onClose={() => closeApp("ProfileApp")}
       onMinimize={() => minimizeApp("ProfileApp")}
-      onMaximize={() => maximizeApp("ProfileApp")}
       isMinimized={profileApp.isMinimized}
-      isMaximized={profileApp.isMaximized}
       position={profileApp.position}
-      onMove={(x, y) => moveApp("ProfileApp", x, y)}
+      onMove={(x: number, y: number) => moveApp("ProfileApp", x, y)}
     >
       <p><strong>Username:</strong> {user.bungieGlobalDisplayName}</p>
       <p><strong>Display Name:</strong> {user.displayName}</p>

@@ -10,6 +10,7 @@
   overflow: hidden;
   min-width: 220px;
   min-height: 120px;
+  /* No margin! */
 }
 
 .app-window-header {
@@ -58,15 +59,11 @@
 
 .app-window-content {
   flex: 1 1 auto;
-  padding: 1.5rem 1.5rem 1.5rem 1.5rem;
+  padding: 1.5rem;
   background: var(--window-bg);
   overflow: auto;
   color: var(--window-header-fg);
   font-size: 1.05rem;
-}
-
-.resize-handle {
-  display: none !important; /* Hide default handle */
 }
 
 .window-btn {
@@ -80,14 +77,4 @@
 }
 .window-btn:hover {
   background: var(--button-hover);
-}
-.app-window-header {
-  background: var(--window-header-bg);
-  color: var(--window-header-fg);
-}
-.app-window {
-  background: var(--window-bg);
-  border: 1px solid var(--window-border);
-  border-radius: 4px;
-  overflow: hidden;
 }

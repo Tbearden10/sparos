@@ -1,7 +1,5 @@
 import React, { useRef } from "react";
 import Draggable, { DraggableData } from "react-draggable";
-import { ResizableBox } from "react-resizable";
-import "react-resizable/css/styles.css";
 import "../styles/AppWindow.css";
 
 interface AppWindowProps {
@@ -9,66 +7,59 @@ interface AppWindowProps {
   children: React.ReactNode;
   width?: number;
   height?: number;
-  minConstraints?: [number, number];
-  maxConstraints?: [number, number];
   onClose?: () => void;
   onMinimize?: () => void;
-  onMaximize?: () => void;
   isMinimized?: boolean;
-  isMaximized?: boolean;
   position?: { x: number; y: number };
   onMove?: (x: number, y: number) => void;
 }
+
+const TASKBAR_HEIGHT = 44; // px, must match your CSS
 
 function AppWindow({
   title,
   children,
   width = 400,
   height = 300,
-  minConstraints = [300, 200],
-  maxConstraints = [800, 600],
   onClose,
   onMinimize,
-  onMaximize,
   isMinimized = false,
-  isMaximized = false,
   position = { x: 100, y: 100 },
   onMove,
 }: AppWindowProps) {
   const nodeRef = useRef<HTMLDivElement>(null);
 
-  // Hide the app entirely when minimized
+  // Compute bounds so window can't be moved off screen or below taskbar
+  const bounds = {
+    left: 0,
+    top: 0,
+    right: window.innerWidth - width,
+    bottom: window.innerHeight - TASKBAR_HEIGHT - height,
+  };
+
   if (isMinimized) return null;
 
   return (
     <Draggable
-      grid={[20, 20]}
       nodeRef={nodeRef}
       position={position}
+      handle=".app-window-header"
+      bounds={bounds}
       onStop={(_, data: DraggableData) => {
         if (onMove) onMove(data.x, data.y);
       }}
     >
-      <div ref={nodeRef}>
-        <ResizableBox
-          width={isMaximized ? maxConstraints[0] : width}
-          height={isMaximized ? maxConstraints[1] : height}
-          minConstraints={minConstraints}
-          maxConstraints={maxConstraints}
-          handle={<span className="resize-handle" />}
-        >
-          <div className="app-window">
-            <div className="app-window-header">
-              <span className="app-window-title">{title}</span>
-              <div className="app-window-controls">
-                <button className="window-btn" onClick={onMinimize} title="Minimize">_</button>
-                <button className="window-btn" onClick={onMaximize} title="Maximize">{isMaximized ? "🗗" : "🗖"}</button>
-                <button className="window-btn" onClick={onClose} title="Close">×</button>
-              </div>
+      <div ref={nodeRef} style={{ width, height }}>
+        <div className="app-window" style={{ width: "100%", height: "100%" }}>
+          <div className="app-window-header">
+            <span className="app-window-title">{title}</span>
+            <div className="app-window-controls">
+              <button className="window-btn" onClick={onMinimize} title="Minimize">_</button>
+              <button className="window-btn" onClick={onClose} title="Close">×</button>
             </div>
-            <div className="app-window-content">{children}</div>
           </div>
-        </ResizableBox>
+          <div className="app-window-content">{children}</div>
+        </div>
       </div>
     </Draggable>
   );
